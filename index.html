@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Speak in 3 — 英会話タイムアタック</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">3</span>
+    <span class="brand-name">Speak in 3</span>
+  </div>
+  <ol class="stepper" id="stepper">
+    <li data-step="theme" class="active">テーマ</li>
+    <li data-step="study">単語・例文</li>
+    <li data-step="quiz">四択テスト</li>
+    <li data-step="talk">タイムアタック会話</li>
+    <li data-step="review">ふりかえり</li>
+  </ol>
+</header>
+
+<main>
+
+  <!-- STEP 1: テーマ入力 -->
+  <section class="view active" id="view-theme">
+    <div class="hero">
+      <h1>今日は、なにを話す？</h1>
+      <p class="lede">好きなテーマを日本語で入れると、単語・例文・四択テストをAIがその場で作ります。そのあとは3秒以内に返す英会話タイムアタックへ。</p>
+      <form id="theme-form" class="theme-form">
+        <input type="text" id="theme-input" placeholder="例：カフェでの注文、旅行の予定、週末の予定" required>
+        <button type="submit" class="btn-primary">テーマで始める</button>
+      </form>
+      <div class="quick-themes">
+        <span>やってみる：</span>
+        <button class="chip" data-theme="カフェでの注文">カフェでの注文</button>
+        <button class="chip" data-theme="空港での手続き">空港での手続き</button>
+        <button class="chip" data-theme="週末の予定">週末の予定</button>
+        <button class="chip" data-theme="道案内">道案内</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 2: 単語・例文 -->
+  <section class="view" id="view-study">
+    <h2 class="section-title">単語 &amp; 例文 <span class="theme-tag" id="study-theme-tag"></span></h2>
+    <div class="loader" id="study-loader"><div class="ring"></div><p>AIが単語と例文を作っています…</p></div>
+    <div class="word-grid" id="word-grid"></div>
+    <button class="btn-primary next-btn" id="to-quiz-btn" hidden>四択テストに進む</button>
+  </section>
+
+  <!-- STEP 3: 四択テスト -->
+  <section class="view" id="view-quiz">
+    <h2 class="section-title">四択テスト</h2>
+    <div class="quiz-progress"><span id="quiz-progress-text">1 / 5</span><div class="bar"><div class="bar-fill" id="quiz-bar-fill"></div></div></div>
+    <div class="quiz-card" id="quiz-card"></div>
+    <button class="btn-primary next-btn" id="to-talk-btn" hidden>会話タイムアタックへ</button>
+  </section>
+
+  <!-- STEP 4: 会話タイムアタック -->
+  <section class="view" id="view-talk">
+    <h2 class="section-title">会話タイムアタック</h2>
+    <p class="lede small">AIの発話が終わったら、<strong>3秒以内</strong>にマイクへ向かって答えて。</p>
+    <div class="talk-stage">
+      <div class="ai-line" id="ai-line">準備中…</div>
+      <div class="mic-wrap">
+        <svg class="timer-ring" viewBox="0 0 140 140">
+          <circle class="ring-track" cx="70" cy="70" r="62"></circle>
+          <circle class="ring-progress" id="ring-progress" cx="70" cy="70" r="62"></circle>
+        </svg>
+        <button class="mic-btn" id="mic-btn" aria-label="マイクで話す">
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        </button>
+        <span class="timer-num" id="timer-num">3.0</span>
+      </div>
+      <div class="you-line" id="you-line">&nbsp;</div>
+    </div>
+    <div class="talk-log" id="talk-log"></div>
+    <button class="btn-secondary" id="end-talk-btn">会話を終えてふりかえる</button>
+  </section>
+
+  <!-- STEP 5: ふりかえり -->
+  <section class="view" id="view-review">
+    <h2 class="section-title">ふりかえり</h2>
+    <div class="loader" id="review-loader"><div class="ring"></div><p>AIが会話を評価しています…</p></div>
+    <div class="review-card" id="review-card" hidden>
+      <div class="score-badge" id="score-badge">--</div>
+      <div class="review-block">
+        <h3>文法の正確さ</h3>
+        <p id="review-grammar"></p>
+      </div>
+      <div class="review-block">
+        <h3>より自然な表現</h3>
+        <ul id="review-natural"></ul>
+      </div>
+      <div class="review-block">
+        <h3>会話のまとめ</h3>
+        <p id="review-summary"></p>
+      </div>
+      <button class="btn-primary" id="restart-btn">別のテーマでもう一度</button>
+    </div>
+  </section>
+
+</main>
+
+<script src="script.js"></script>
+</body>
+</html>
