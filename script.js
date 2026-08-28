@@ -15,16 +15,22 @@ document.getElementById("wait-time-select").addEventListener("change", (e) => {
 let auth = { sessionToken: null, nickname: null };
 
 function rawCallBackend(action, payload){
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20秒でタイムアウト
   return fetch(GAS_URL, {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
-    body: JSON.stringify({ action, ...payload })
+    body: JSON.stringify({ action, ...payload }),
+    signal: controller.signal
   }).then(async res => {
     if (!res.ok) throw new Error("サーバーエラー: " + res.status);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     return data;
-  });
+  }).catch(err => {
+    if (err.name === "AbortError") throw new Error("サーバーの応答がありませんでした（タイムアウト）");
+    throw err;
+  }).finally(() => clearTimeout(timeoutId));
 }
 
 function showAuthMsg(id, text, ok){
@@ -134,12 +140,14 @@ function completeLogin(sessionToken, nickname){
   document.getElementById("auth-screen").hidden = true;
   document.getElementById("app-screen").hidden = false;
   goToView("theme");
+  restoreProgress(); // 進行中のテーマ・単語・四択があれば復元し、どのステップからでも共有されるようにする
 }
 
 function logout(){
   if (auth.sessionToken) rawCallBackend("logout", { sessionToken: auth.sessionToken }).catch(() => {});
   auth = { sessionToken: null, nickname: null };
   localStorage.removeItem("speakin3_session");
+  clearProgress();
   document.getElementById("app-screen").hidden = true;
   document.getElementById("auth-screen").hidden = false;
   switchAuthTab("login");
@@ -333,6 +341,7 @@ function jumpToStep(step){
     document.getElementById("normal-theme-tag").textContent = state.theme;
     if (!state.theme) document.getElementById("normal-ai-line").textContent = "先にテーマを選んでください。";
   } else if (step === "talk"){
+    document.getElementById("talk-theme-tag").textContent = state.theme;
     if (state.talkHistory.length === 0){
       if (state.theme) startConversation();
       else document.getElementById("ai-line").textContent = "先にテーマを選んでください。";
@@ -417,11 +426,22 @@ function rebuildTalkLog(){
 
 /* ---------- GAS呼び出し（text/plainでPOSTしCORSを回避）---------- */
 async function callBackend(action, payload){
-  const res = await fetch(GAS_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain" },
-    body: JSON.stringify({ action, sessionToken: auth.sessionToken, ...payload })
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12秒でタイムアウト
+  let res;
+  try{
+    res = await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action, sessionToken: auth.sessionToken, ...payload }),
+      signal: controller.signal
+    });
+  }catch(err){
+    if (err.name === "AbortError") throw new Error("サーバーの応答がありませんでした（タイムアウト）");
+    throw new Error("通信エラー: " + err.message);
+  }finally{
+    clearTimeout(timeoutId);
+  }
   if (!res.ok) throw new Error("サーバーエラー: " + res.status);
   const data = await res.json();
   if (data.error) throw new Error(data.error);
@@ -540,6 +560,7 @@ async function startThemeFromTranscript(transcript){
     document.getElementById("study-theme-tag").textContent = state.theme;
     renderTranscriptSummary();
     renderWordGrid();
+    persistProgress();
   }catch(err){
     document.getElementById("word-grid").innerHTML =
       `<p style="color:var(--coral)">生成に失敗しました: ${escapeHtml(err.message)}</p>`;
@@ -566,6 +587,7 @@ async function startTheme(theme){
     state.words = data.words || [];
     state.quiz = data.quiz || [];
     renderWordGrid();
+    persistProgress();
   }catch(err){
     document.getElementById("word-grid").innerHTML =
       `<p style="color:var(--coral)">生成に失敗しました: ${escapeHtml(err.message)}</p>`;
@@ -582,6 +604,40 @@ function renderTranscriptSummary(){
   } else {
     card.hidden = true;
   }
+}
+
+/* ---------- 進行中のテーマ・単語・四択を端末に保存し、どのステップからでも共有されるようにする ---------- */
+function persistProgress(){
+  try{
+    localStorage.setItem("speakin3_progress", JSON.stringify({
+      theme: state.theme,
+      transcriptSummary: state.transcriptSummary,
+      words: state.words,
+      quiz: state.quiz
+    }));
+  }catch(e){ /* 保存できなくても致命的ではないので無視 */ }
+}
+
+function restoreProgress(){
+  try{
+    const raw = localStorage.getItem("speakin3_progress");
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (saved && saved.theme && !state.theme){
+      state.theme = saved.theme;
+      state.transcriptSummary = saved.transcriptSummary || "";
+      state.words = saved.words || [];
+      state.quiz = saved.quiz || [];
+      document.getElementById("study-theme-tag").textContent = state.theme;
+      document.getElementById("normal-theme-tag").textContent = state.theme;
+      renderTranscriptSummary();
+      renderWordGrid();
+    }
+  }catch(e){ /* 壊れたデータは無視 */ }
+}
+
+function clearProgress(){
+  localStorage.removeItem("speakin3_progress");
 }
 
 function renderWordGrid(){
@@ -696,8 +752,14 @@ function updateNormalTimer(){
 }
 
 async function startNormalConversation(){
-  const opener = `Let's have a relaxed conversation about ${state.theme}. Tell me anything about it.`;
-  await pushNormalAiLine(opener);
+  document.getElementById("normal-ai-line").textContent = "準備中…";
+  try{
+    const data = await callBackendWithRetry("normalChatReply",
+      { theme: state.theme, history: [], context: state.transcriptSummary }, 0);
+    await pushNormalAiLine(data.reply);
+  }catch(err){
+    await pushNormalAiLine(`Let's have a relaxed conversation about ${state.theme}. Tell me anything about it.`);
+  }
 }
 
 function addNormalLogRow(role, text){
@@ -715,6 +777,7 @@ async function pushNormalAiLine(text){
   addNormalLogRow("ai", text);
   await speak(text);
   if (normalTimeUp){ endNormalConversation(); return; }
+  await settleAfterSpeak(); // 読み上げの残響がマイクに入らないよう少し待つ
   beginNormalListen();
 }
 
@@ -723,13 +786,14 @@ function beginNormalListen(){
     document.getElementById("normal-you-line").textContent = "この端末は音声認識に対応していません。";
     return;
   }
+  synth && synth.cancel(); // Android等でTTSが完全に止まっていない状態を防ぐ保険
   const indicator = document.getElementById("normal-mic-indicator");
   let handled = false;
 
   normalRecognizer = new SpeechRecognition();
   normalRecognizer.lang = "en-US";
   normalRecognizer.interimResults = true;
-  normalRecognizer.continuous = false;
+  normalRecognizer.continuous = true; // 話し始めてすぐ打ち切られないよう、区切らずに聞き続ける
 
   normalRecognizer.onresult = (e) => {
     let finalText = "";
@@ -737,6 +801,10 @@ function beginNormalListen(){
       if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
     }
     if (finalText.trim()){
+      const lastAi = normalHistory[normalHistory.length - 1];
+      if (lastAi && lastAi.role === "ai" && isLikelyEcho(finalText, lastAi.text)){
+        return; // AI自身の音声を拾っただけなので無視して聞き直す
+      }
       handled = true;
       document.getElementById("normal-you-line").textContent = finalText;
       addNormalLogRow("you", finalText);
@@ -749,7 +817,10 @@ function beginNormalListen(){
   normalRecognizer.onend = () => {
     indicator.classList.remove("listening");
     if (!handled && normalActive && !normalTimeUp){
-      try{ normalRecognizer.start(); indicator.classList.add("listening"); }catch(e){}
+      setTimeout(() => {
+        if (handled || !normalActive || normalTimeUp) return;
+        beginNormalListen();
+      }, 150);
     }
   };
 
@@ -759,7 +830,8 @@ function beginNormalListen(){
 async function continueNormalConversation(){
   if (normalTimeUp){ endNormalConversation(); return; }
   try{
-    const data = await callBackendWithRetry("normalChatReply", { theme: state.theme, history: normalHistory }, 1);
+    const data = await callBackendWithRetry("normalChatReply",
+      { theme: state.theme, history: normalHistory, context: state.transcriptSummary }, 1);
     await pushNormalAiLine(data.reply);
   }catch(err){
     await pushNormalAiLine("Sorry, could you say that again?");
@@ -807,12 +879,56 @@ function speak(text){
   });
 }
 
+/** TTS終了直後は端末のスピーカー音がマイクに残っていることがあるため、少し待ってから聞き取りを始める */
+/**
+ * TTS終了直後は端末のスピーカー音がマイクに残っていたり、
+ * 特にAndroid Chromeでは speechSynthesis の onend が実際の再生完了より早く
+ * 発火することがあるため、synth.speaking/pending が収まったことも確認しつつ待つ。
+ */
+function settleAfterSpeak(){
+  return new Promise(resolve => {
+    const minWait = 700;
+    const maxWait = 2200; // 保険：最大でもこれ以上は待たない
+    const start = performance.now();
+    function check(){
+      const elapsed = performance.now() - start;
+      const settled = synth && !synth.speaking && !synth.pending;
+      if ((settled && elapsed >= minWait) || elapsed >= maxWait){
+        resolve();
+      } else {
+        setTimeout(check, 100);
+      }
+    }
+    check();
+  });
+}
+
+/**
+ * 認識結果がAI自身の直前の発言をマイクが拾ってしまった「エコー」かどうかを簡易判定する。
+ * ハウリング対策：スピーカー音声が別の音声認識に混入するのを防ぐ。
+ */
+function isLikelyEcho(userText, aiText){
+  const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+  const u = norm(userText);
+  const a = norm(aiText);
+  if (!u) return true; // 空はエコー扱いで無視
+  if (u.length < 3) return false; // 短すぎる発話は判定しない（誤検知防止）
+  return a.includes(u) || u.includes(a);
+}
+
 async function startConversation(){
+  document.getElementById("talk-theme-tag").textContent = state.theme;
   document.getElementById("wait-time-label").textContent = RESPONSE_LIMIT_SEC + "秒";
   document.getElementById("talk-log").innerHTML = "";
   document.getElementById("you-line").textContent = "\u00A0";
-  const opener = `Let's talk about ${state.theme}. Are you ready?`;
-  await pushAiLine(opener);
+  document.getElementById("ai-line").textContent = "準備中…";
+  try{
+    const data = await callBackendWithRetry("chatReply",
+      { theme: state.theme, history: [], context: state.transcriptSummary }, 0);
+    await pushAiLine(data.reply);
+  }catch(err){
+    await pushAiLine(`Let's talk about ${state.theme}. Are you ready?`);
+  }
 }
 
 async function pushAiLine(text){
@@ -820,6 +936,7 @@ async function pushAiLine(text){
   state.talkHistory.push({ role: "ai", text });
   addLogRow("ai", text);
   await speak(text);
+  await settleAfterSpeak(); // 読み上げの残響がマイクに入らないよう少し待つ
   beginListenWindow();
 }
 
@@ -837,44 +954,118 @@ function beginListenWindow(){
     document.getElementById("you-line").textContent = "この端末は音声認識に対応していません。";
     return;
   }
+  synth && synth.cancel(); // Android等でTTSが完全に止まっていない状態を防ぐ保険
   countdownStart = performance.now();
   const ring = document.getElementById("ring-progress");
   const numEl = document.getElementById("timer-num");
   ring.style.strokeDashoffset = "0";
 
-  recognizer = new SpeechRecognition();
-  recognizer.lang = "en-US";
-  recognizer.interimResults = false;
-  recognizer.maxAlternatives = 1;
   let handled = false;
+  let speechStarted = false; // 話し始めたら打ち切らず、話し終わるまで待つ
+  let accumulatedFinal = ""; // 複数文をまとめて蓄積する
+  let lastActivity = 0; // 直近の発話（確定/途中）があった時刻
+  const GRACE_EXTRA_SEC = 8; // 話し始めた後に追加で待つ最大秒数（複数文に対応するため長め）
+  const SILENCE_END_MS = 1500; // 発話後、この時間無音が続いたら「話し終わった」とみなす
 
-  recognizer.onresult = (e) => {
+  function finalizeTurn(){
     if (handled) return;
     handled = true;
     clearInterval(countdownTimer);
-    const said = e.results[0][0].transcript;
+    if (recognizer){ try{ recognizer.stop(); }catch(e){} }
+    const said = accumulatedFinal.trim();
     document.getElementById("you-line").textContent = said;
     addLogRow("you", said);
     state.talkHistory.push({ role: "you", text: said });
     document.getElementById("mic-btn").classList.remove("listening");
     continueConversation();
-  };
-  recognizer.onerror = () => { if (!handled){ handled = true; onTimeout(); } };
-  recognizer.onend = () => {
-    document.getElementById("mic-btn").classList.remove("listening");
-  };
+  }
 
+  function createRecognizer(){
+    const r = new SpeechRecognition();
+    r.lang = "en-US";
+    r.interimResults = true;
+    r.continuous = true; // 話し始めてすぐ打ち切られないよう、区切らずに聞き続ける
+    r.maxAlternatives = 1;
+
+    r.onspeechstart = () => { speechStarted = true; lastActivity = performance.now(); };
+
+    r.onresult = (e) => {
+      let hasActivity = false;
+      for (let i = e.resultIndex; i < e.results.length; i++){
+        const t = e.results[i][0].transcript;
+        if (!t.trim()) continue;
+        if (e.results[i].isFinal){
+          const lastAi = state.talkHistory[state.talkHistory.length - 1];
+          if (!accumulatedFinal && lastAi && lastAi.role === "ai" && isLikelyEcho(t, lastAi.text)){
+            continue; // AI自身の音声を拾っただけの最初の一言は無視
+          }
+          accumulatedFinal += (accumulatedFinal ? " " : "") + t.trim();
+        }
+        hasActivity = true;
+      }
+      if (hasActivity){ speechStarted = true; lastActivity = performance.now(); }
+    };
+
+    // no-speech等の一時的なエラーでは即タイムアウトにせず、onend側の再試行に任せる
+    r.onerror = () => {};
+
+    r.onend = () => {
+      document.getElementById("mic-btn").classList.remove("listening");
+      if (handled) return;
+      const elapsed = (performance.now() - countdownStart) / 1000;
+      const limit = speechStarted ? RESPONSE_LIMIT_SEC + GRACE_EXTRA_SEC : RESPONSE_LIMIT_SEC;
+      const silentFor = performance.now() - lastActivity;
+      if (accumulatedFinal && speechStarted && silentFor > SILENCE_END_MS){
+        finalizeTurn(); // 十分な沈黙があり、既に何か話しているのでここで確定
+        return;
+      }
+      if (elapsed < limit){
+        // まだ制限時間内（話し始めていれば延長分も含む）なので聞き直す。
+        // 直前のマイクセッションが完全に終わるよう少し間を空けてから再起動する（失敗防止）。
+        setTimeout(() => {
+          if (handled) return;
+          recognizer = createRecognizer();
+          try{ recognizer.start(); document.getElementById("mic-btn").classList.add("listening"); }catch(e){}
+        }, 150);
+      }
+      // 時間切れの場合はcountdownTimer側で処理される
+    };
+    return r;
+  }
+
+  recognizer = createRecognizer();
   try{ recognizer.start(); document.getElementById("mic-btn").classList.add("listening"); }
   catch(e){ /* already started */ }
 
   countdownTimer = setInterval(() => {
     const elapsed = (performance.now() - countdownStart) / 1000;
-    const remain = Math.max(0, RESPONSE_LIMIT_SEC - elapsed);
-    numEl.textContent = remain.toFixed(1);
-    ring.style.strokeDashoffset = String(RING_CIRC * (1 - remain / RESPONSE_LIMIT_SEC));
+    const limit = speechStarted ? RESPONSE_LIMIT_SEC + GRACE_EXTRA_SEC : RESPONSE_LIMIT_SEC;
+    const remain = Math.max(0, limit - elapsed);
+
+    if (!speechStarted){
+      numEl.textContent = remain.toFixed(1);
+      ring.style.strokeDashoffset = String(RING_CIRC * (1 - remain / RESPONSE_LIMIT_SEC));
+    } else {
+      numEl.textContent = "…";
+      ring.style.strokeDashoffset = "0"; // 話し始めた後はリングを満タン表示のまま維持
+
+      // 話し終えて一定時間（1.5秒）無音が続いたら、複数文が終わったとみなして確定する
+      if (accumulatedFinal && (performance.now() - lastActivity) > SILENCE_END_MS){
+        finalizeTurn();
+        return;
+      }
+    }
+
     if (remain <= 0){
       clearInterval(countdownTimer);
-      if (!handled){ handled = true; try{ recognizer.stop(); }catch(e){} onTimeout(); }
+      if (handled) return;
+      if (accumulatedFinal.trim()){
+        finalizeTurn();
+      } else {
+        handled = true;
+        try{ recognizer.stop(); }catch(e){}
+        onTimeout();
+      }
     }
   }, 80);
 }
@@ -895,7 +1086,8 @@ async function continueConversation(){
   try{
     const data = await callBackendWithRetry("chatReply", {
       theme: state.theme,
-      history: state.talkHistory
+      history: state.talkHistory,
+      context: state.transcriptSummary
     }, 1);
     await pushAiLine(data.reply);
   }catch(err){
@@ -985,6 +1177,11 @@ function renderReview(data){
 
 document.getElementById("restart-btn").addEventListener("click", () => {
   document.getElementById("theme-input").value = "";
+  state.theme = "";
+  state.transcriptSummary = "";
+  state.words = [];
+  state.quiz = [];
+  clearProgress();
   goToView("theme");
 });
 
@@ -1098,6 +1295,7 @@ async function handlePastAction(action, rowIndex){
       document.getElementById("study-theme-tag").textContent = state.theme + "（過去の記録）";
       renderTranscriptSummary();
       renderWordGrid();
+      persistProgress();
       goToView("study");
     } else {
       goToView("review");
