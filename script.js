@@ -277,7 +277,7 @@ let state = {
 };
 
 /* ---------- 画面遷移 ---------- */
-const STEP_ORDER = ["theme","study","quiz","talk","review"];
+const STEP_ORDER = ["theme","study","quiz","normal","talk","review"];
 function goToView(step){
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   document.getElementById("view-" + step).classList.add("active");
@@ -295,19 +295,17 @@ function currentStep(){
 }
 function updateNavVisibility(){
   const step = currentStep();
-  const idx = STEP_ORDER.indexOf(step);
   // 前へ戻る/最初から/次へ進む は「タイムアタック会話」の中でのみ使う
   document.getElementById("bottom-nav").hidden = (step !== "talk");
-  document.getElementById("nav-back").style.visibility = idx > 0 ? "visible" : "hidden";
-  document.getElementById("nav-next").style.visibility =
-    (idx > 0 && idx < STEP_ORDER.length - 1) ? "visible" : "hidden";
 }
 function stopActiveStepProcesses(){
   if (typeof isRecording !== "undefined" && isRecording) stopRecording();
   clearInterval(countdownTimer);
   clearInterval(themeTimerInterval);
+  clearInterval(normalTimerInterval);
   if (recognizer){ try{ recognizer.stop(); }catch(e){} }
   if (themeRecognizer){ try{ themeRecognizer.stop(); }catch(e){} }
+  if (normalRecognizer){ try{ normalRecognizer.stop(); }catch(e){} }
   synth && synth.cancel();
 }
 
@@ -330,6 +328,9 @@ function jumpToStep(step){
     } else {
       document.getElementById("quiz-card").innerHTML = "<p>テストがまだ生成されていません。テーマ入力からやり直してください。</p>";
     }
+  } else if (step === "normal"){
+    document.getElementById("normal-theme-tag").textContent = state.theme;
+    if (!state.theme) document.getElementById("normal-ai-line").textContent = "先にテーマを選んでください。";
   } else if (step === "talk"){
     if (state.talkHistory.length === 0){
       if (state.theme) startConversation();
@@ -347,46 +348,71 @@ function jumpToStep(step){
   }
 }
 
+/* --- 会話タイムアタック内の質問ナビゲーション --- */
 document.getElementById("nav-back").addEventListener("click", () => {
-  const idx = STEP_ORDER.indexOf(currentStep());
-  if (idx <= 0) return;
-  stopActiveStepProcesses();
-  goToView(STEP_ORDER[idx - 1]);
+  goBackQuestion();
 });
 
 document.getElementById("nav-next").addEventListener("click", () => {
-  const cur = currentStep();
-  const idx = STEP_ORDER.indexOf(cur);
-  if (idx < 0 || idx >= STEP_ORDER.length - 1) return;
-  stopActiveStepProcesses();
-
-  if (cur === "study"){
-    goToView("quiz");
-    if (state.quiz.length) renderQuizQuestion();
-    else document.getElementById("quiz-card").innerHTML = "<p>テストがまだ生成されていません。テーマ入力からやり直してください。</p>";
-  } else if (cur === "quiz"){
-    goToView("talk");
-    startConversation();
-  } else if (cur === "talk"){
-    goToView("review");
-    runEvaluation();
-  }
+  skipQuestion();
 });
 
 document.getElementById("nav-restart").addEventListener("click", () => {
-  if (!confirm("最初からやり直しますか？ここまでの内容は失われます。")) return;
-  stopActiveStepProcesses();
-  state = { theme:"", words:[], quiz:[], quizIndex:0, quizScore:0, talkHistory:[], sessionId:null };
-  themeTranscriptFinal = "";
-  document.getElementById("theme-input").value = "";
-  document.getElementById("transcript-box").hidden = true;
-  document.getElementById("transcript-box").textContent = "";
-  document.getElementById("use-transcript-btn").hidden = true;
-  document.getElementById("record-status").textContent = "タップして話し始める";
-  document.getElementById("record-elapsed").textContent = "0:00";
-  document.getElementById("record-bar-fill").style.width = "0%";
-  goToView("theme");
+  if (!confirm("この会話を最初からやり直しますか？ここまでのやり取りは失われます。")) return;
+  restartConversationOnly();
 });
+
+/** 直近のAIの質問より後のやり取りを取り消し、その質問をもう一度出題する */
+function goBackQuestion(){
+  clearInterval(countdownTimer);
+  if (recognizer){ try{ recognizer.stop(); }catch(e){} }
+  synth && synth.cancel();
+
+  let lastAiIdx = -1;
+  for (let i = state.talkHistory.length - 1; i >= 0; i--){
+    if (state.talkHistory[i].role === "ai"){ lastAiIdx = i; break; }
+  }
+  if (lastAiIdx === -1) return; // まだAIの発話がない
+
+  const aiText = state.talkHistory[lastAiIdx].text;
+  state.talkHistory = state.talkHistory.slice(0, lastAiIdx + 1);
+  rebuildTalkLog();
+  document.getElementById("ai-line").textContent = aiText;
+  document.getElementById("you-line").textContent = "\u00A0";
+  speak(aiText).then(() => beginListenWindow());
+}
+
+/** 今の質問への回答をスキップし、次の質問へ進む */
+function skipQuestion(){
+  clearInterval(countdownTimer);
+  if (recognizer){ try{ recognizer.stop(); }catch(e){} }
+  document.getElementById("you-line").textContent = "（スキップ）";
+  addLogRow("timeout", "この質問をスキップしました");
+  state.talkHistory.push({ role: "you", text: "(skipped by user)", skipped: true });
+  continueConversation();
+}
+
+/** 会話タイムアタックだけを最初からやり直す（テーマ・単語・四択はそのまま） */
+function restartConversationOnly(){
+  clearInterval(countdownTimer);
+  if (recognizer){ try{ recognizer.stop(); }catch(e){} }
+  synth && synth.cancel();
+  state.talkHistory = [];
+  document.getElementById("talk-log").innerHTML = "";
+  startConversation();
+}
+
+/** talkHistory全体から会話ログ表示を再構築する（前へ戻る後などに使用） */
+function rebuildTalkLog(){
+  const log = document.getElementById("talk-log");
+  log.innerHTML = "";
+  state.talkHistory.forEach(h => {
+    if (h.role === "ai") addLogRow("ai", h.text);
+    else if (h.timedOut) addLogRow("timeout", "3秒以内に応答できませんでした");
+    else if (h.skipped) addLogRow("timeout", "この質問をスキップしました");
+    else addLogRow("you", h.text);
+  });
+}
 
 /* ---------- GAS呼び出し（text/plainでPOSTしCORSを回避）---------- */
 async function callBackend(action, payload){
@@ -567,7 +593,7 @@ function renderQuizQuestion(){
   const i = state.quizIndex;
   document.getElementById("quiz-progress-text").textContent = `${i+1} / ${total}`;
   document.getElementById("quiz-bar-fill").style.width = `${(i/total)*100}%`;
-  document.getElementById("to-talk-btn").hidden = true;
+  document.getElementById("to-normal-btn").hidden = true;
 
   const q = state.quiz[i];
   const card = document.getElementById("quiz-card");
@@ -589,20 +615,162 @@ function renderQuizQuestion(){
           renderQuizQuestion();
         } else {
           document.getElementById("quiz-bar-fill").style.width = "100%";
-          document.getElementById("to-talk-btn").hidden = false;
+          document.getElementById("to-normal-btn").hidden = false;
           card.innerHTML = `<p>お疲れさま！ ${state.quizScore} / ${total} 問正解でした。</p>`;
         }
       }, 900);
     });
   });
 }
-document.getElementById("to-talk-btn").addEventListener("click", () => {
+document.getElementById("to-normal-btn").addEventListener("click", () => {
+  document.getElementById("normal-theme-tag").textContent = state.theme;
+  goToView("normal");
+});
+
+/* ============================================================
+   STEP 4: 通常会話（時間制限内で自由に会話）
+   ============================================================ */
+let normalHistory = [];
+let normalRecognizer = null;
+let normalTimerInterval = null;
+let normalStart = 0;
+let normalDurationSec = 180;
+let normalActive = false;
+let normalTimeUp = false;
+
+function formatMMSS(totalSec){
+  const s = Math.max(0, Math.round(totalSec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+document.getElementById("normal-start-btn").addEventListener("click", () => {
+  if (!state.theme){ alert("先にテーマを選んでください"); return; }
+  normalDurationSec = Number(document.getElementById("normal-duration-select").value);
+  normalTimeUp = false;
+  normalActive = true;
+  normalHistory = [];
+
+  document.getElementById("normal-total").textContent = formatMMSS(normalDurationSec);
+  document.getElementById("normal-elapsed").textContent = "0:00";
+  document.getElementById("normal-bar-fill").style.width = "0%";
+  document.getElementById("normal-log").innerHTML = "";
+  document.getElementById("normal-you-line").textContent = "\u00A0";
+  document.getElementById("normal-start-btn").hidden = true;
+  document.getElementById("normal-duration-row").hidden = true;
+  document.getElementById("to-talk-from-normal-btn").hidden = true;
+  document.getElementById("normal-stage").hidden = false;
+
+  normalStart = performance.now();
+  normalTimerInterval = setInterval(updateNormalTimer, 250);
+  startNormalConversation();
+});
+
+function updateNormalTimer(){
+  const elapsed = (performance.now() - normalStart) / 1000;
+  const remain = Math.max(0, normalDurationSec - elapsed);
+  document.getElementById("normal-elapsed").textContent = formatMMSS(Math.min(elapsed, normalDurationSec));
+  document.getElementById("normal-bar-fill").style.width = `${Math.min(100, (elapsed / normalDurationSec) * 100)}%`;
+  if (remain <= 0 && normalActive){
+    normalTimeUp = true;
+    clearInterval(normalTimerInterval);
+    if (normalRecognizer){ try{ normalRecognizer.stop(); }catch(e){} }
+    synth && synth.cancel();
+    endNormalConversation();
+  }
+}
+
+async function startNormalConversation(){
+  const opener = `Let's have a relaxed conversation about ${state.theme}. Tell me anything about it.`;
+  await pushNormalAiLine(opener);
+}
+
+function addNormalLogRow(role, text){
+  const log = document.getElementById("normal-log");
+  const row = document.createElement("div");
+  row.className = "row " + role;
+  row.textContent = (role === "ai" ? "AI: " : "あなた: ") + text;
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function pushNormalAiLine(text){
+  document.getElementById("normal-ai-line").textContent = text;
+  normalHistory.push({ role: "ai", text });
+  addNormalLogRow("ai", text);
+  await speak(text);
+  if (normalTimeUp){ endNormalConversation(); return; }
+  beginNormalListen();
+}
+
+function beginNormalListen(){
+  if (!SpeechRecognition){
+    document.getElementById("normal-you-line").textContent = "この端末は音声認識に対応していません。";
+    return;
+  }
+  const indicator = document.getElementById("normal-mic-indicator");
+  let handled = false;
+
+  normalRecognizer = new SpeechRecognition();
+  normalRecognizer.lang = "en-US";
+  normalRecognizer.interimResults = true;
+  normalRecognizer.continuous = false;
+
+  normalRecognizer.onresult = (e) => {
+    let finalText = "";
+    for (let i = e.resultIndex; i < e.results.length; i++){
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+    }
+    if (finalText.trim()){
+      handled = true;
+      document.getElementById("normal-you-line").textContent = finalText;
+      addNormalLogRow("you", finalText);
+      normalHistory.push({ role: "you", text: finalText });
+      indicator.classList.remove("listening");
+      continueNormalConversation();
+    }
+  };
+  normalRecognizer.onerror = () => { /* 無音などは onend 側で再試行 */ };
+  normalRecognizer.onend = () => {
+    indicator.classList.remove("listening");
+    if (!handled && normalActive && !normalTimeUp){
+      try{ normalRecognizer.start(); indicator.classList.add("listening"); }catch(e){}
+    }
+  };
+
+  try{ normalRecognizer.start(); indicator.classList.add("listening"); }catch(e){}
+}
+
+async function continueNormalConversation(){
+  if (normalTimeUp){ endNormalConversation(); return; }
+  try{
+    const data = await callBackendWithRetry("chatReply", { theme: state.theme, history: normalHistory }, 1);
+    await pushNormalAiLine(data.reply);
+  }catch(err){
+    await pushNormalAiLine("Sorry, could you say that again?");
+  }
+}
+
+document.getElementById("normal-end-btn").addEventListener("click", () => {
+  endNormalConversation();
+});
+
+function endNormalConversation(){
+  normalActive = false;
+  clearInterval(normalTimerInterval);
+  if (normalRecognizer){ try{ normalRecognizer.stop(); }catch(e){} }
+  synth && synth.cancel();
+  document.getElementById("normal-mic-indicator").classList.remove("listening");
+  document.getElementById("normal-ai-line").textContent = "お疲れさま！通常会話はここで終了です。";
+  document.getElementById("to-talk-from-normal-btn").hidden = false;
+}
+
+document.getElementById("to-talk-from-normal-btn").addEventListener("click", () => {
   goToView("talk");
   startConversation();
 });
 
 /* ============================================================
-   STEP 4: 会話タイムアタック（Web Speech API）
+   STEP 5: 会話タイムアタック（Web Speech API）
    ============================================================ */
 const synth = window.speechSynthesis;
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;

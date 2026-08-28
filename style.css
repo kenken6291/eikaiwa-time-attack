@@ -294,6 +294,21 @@ main{max-width:640px; margin:0 auto; padding:22px 18px 100px;}
 .quiz-opt.correct{background:rgba(63,199,154,0.15); border-color:var(--mint);}
 .quiz-opt.wrong{background:rgba(255,107,91,0.12); border-color:var(--coral);}
 
+/* ── Normal conversation (自由会話) ───────────────────────── */
+.normal-timer{
+  display:flex; justify-content:center; gap:5px; font-family:var(--font-mono);
+  font-weight:600; font-size:13px; color:var(--muted); margin-bottom:6px;
+}
+.normal-stage{display:flex; flex-direction:column; gap:14px; margin-top:18px;}
+.mic-indicator{
+  width:52px; height:52px; border-radius:50%; margin:4px auto;
+  background:var(--coral); color:#fff; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 6px 16px rgba(255,107,91,0.3);
+}
+.mic-indicator.listening{ background:var(--mint); animation:pulse 1.4s ease-in-out infinite; }
+#normal-start-btn{width:100%; margin-top:2px;}
+#normal-end-btn{width:100%;}
+
 /* ── Talk / timer ring ───────────────────────── */
 .talk-stage{display:flex; flex-direction:column; align-items:center; gap:18px; padding:12px 0 22px;}
 .ai-line{

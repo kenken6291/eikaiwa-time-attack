@@ -82,6 +82,7 @@
     <li data-step="theme" class="active">テーマ</li>
     <li data-step="study">単語・例文</li>
     <li data-step="quiz">四択テスト</li>
+    <li data-step="normal">通常会話</li>
     <li data-step="talk">タイムアタック会話</li>
     <li data-step="review">ふりかえり</li>
   </ol>
@@ -152,10 +153,45 @@
     <h2 class="section-title">四択テスト</h2>
     <div class="quiz-progress"><span id="quiz-progress-text">1 / 5</span><div class="bar"><div class="bar-fill" id="quiz-bar-fill"></div></div></div>
     <div class="quiz-card" id="quiz-card"></div>
-    <button class="btn-primary next-btn" id="to-talk-btn" hidden>会話タイムアタックへ</button>
+    <button class="btn-primary next-btn" id="to-normal-btn" hidden>通常会話へ</button>
   </section>
 
-  <!-- STEP 4: 会話タイムアタック -->
+  <!-- STEP 4: 通常会話 -->
+  <section class="view" id="view-normal">
+    <h2 class="section-title">通常会話 <span class="theme-tag" id="normal-theme-tag"></span></h2>
+    <p class="lede small">時間制限なしで、AIとテーマについて自由に会話してみましょう。設定した時間、会話が続きます。</p>
+
+    <div class="settings-row" id="normal-duration-row">
+      <label for="normal-duration-select">会話時間</label>
+      <select id="normal-duration-select">
+        <option value="60">1分</option>
+        <option value="120">2分</option>
+        <option value="180" selected>3分</option>
+        <option value="300">5分</option>
+        <option value="600">10分</option>
+      </select>
+    </div>
+    <button class="btn-primary" id="normal-start-btn">この時間で会話を始める</button>
+
+    <div class="normal-stage" id="normal-stage" hidden>
+      <div class="normal-timer">
+        <span id="normal-elapsed">0:00</span><span class="record-sep">/</span><span id="normal-total">3:00</span>
+      </div>
+      <div class="bar record-bar"><div class="bar-fill" id="normal-bar-fill"></div></div>
+
+      <div class="ai-line" id="normal-ai-line">準備中…</div>
+      <div class="mic-indicator" id="normal-mic-indicator">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+      </div>
+      <div class="you-line" id="normal-you-line">&nbsp;</div>
+      <div class="talk-log" id="normal-log"></div>
+      <button class="btn-secondary" id="normal-end-btn">会話を終える</button>
+    </div>
+
+    <button class="btn-primary next-btn" id="to-talk-from-normal-btn" hidden>タイムアタック会話へ進む</button>
+  </section>
+
+  <!-- STEP 5: 会話タイムアタック -->
   <section class="view" id="view-talk">
     <h2 class="section-title">会話タイムアタック</h2>
     <p class="lede small">AIの発話が終わったら、<strong id="wait-time-label">3秒</strong>以内にマイクへ向かって答えて。</p>
