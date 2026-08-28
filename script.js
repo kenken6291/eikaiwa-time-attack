@@ -294,7 +294,10 @@ function currentStep(){
   return document.querySelector(".view.active").id.replace("view-", "");
 }
 function updateNavVisibility(){
-  const idx = STEP_ORDER.indexOf(currentStep());
+  const step = currentStep();
+  const idx = STEP_ORDER.indexOf(step);
+  // 前へ戻る/最初から/次へ進む は「タイムアタック会話」の中でのみ使う
+  document.getElementById("bottom-nav").hidden = (step !== "talk");
   document.getElementById("nav-back").style.visibility = idx > 0 ? "visible" : "hidden";
   document.getElementById("nav-next").style.visibility =
     (idx > 0 && idx < STEP_ORDER.length - 1) ? "visible" : "hidden";
@@ -306,6 +309,42 @@ function stopActiveStepProcesses(){
   if (recognizer){ try{ recognizer.stop(); }catch(e){} }
   if (themeRecognizer){ try{ themeRecognizer.stop(); }catch(e){} }
   synth && synth.cancel();
+}
+
+/* ---------- ステッパー（テーマ/単語・例文/四択テスト/会話/ふりかえり）を直接クリックで移動 ---------- */
+document.querySelectorAll("#stepper li").forEach(li => {
+  li.addEventListener("click", () => jumpToStep(li.dataset.step));
+});
+
+function jumpToStep(step){
+  if (step === currentStep()) return;
+  stopActiveStepProcesses();
+  goToView(step);
+
+  if (step === "study"){
+    if (state.words.length) renderWordGrid();
+  } else if (step === "quiz"){
+    if (state.quiz.length){
+      if (state.quizIndex >= state.quiz.length) state.quizIndex = state.quiz.length - 1;
+      renderQuizQuestion();
+    } else {
+      document.getElementById("quiz-card").innerHTML = "<p>テストがまだ生成されていません。テーマ入力からやり直してください。</p>";
+    }
+  } else if (step === "talk"){
+    if (state.talkHistory.length === 0){
+      if (state.theme) startConversation();
+      else document.getElementById("ai-line").textContent = "先にテーマを選んでください。";
+    }
+  } else if (step === "review"){
+    if (document.getElementById("review-card").hidden){
+      if (state.talkHistory.length > 0) runEvaluation();
+      else{
+        document.getElementById("review-loader").hidden = true;
+        document.getElementById("review-summary").textContent = "まだ会話がありません。先にタイムアタック会話を行ってください。";
+        document.getElementById("review-card").hidden = false;
+      }
+    }
+  }
 }
 
 document.getElementById("nav-back").addEventListener("click", () => {
