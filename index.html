@@ -10,10 +10,73 @@
 </head>
 <body>
 
+<!-- 認証画面 -->
+<div class="auth-screen" id="auth-screen">
+  <div class="auth-card">
+    <div class="brand center">
+      <span class="brand-mark">3</span>
+      <span class="brand-name">Speak in 3</span>
+    </div>
+
+    <div class="auth-tabs" id="auth-tabs">
+      <button class="auth-tab active" data-tab="login">ログイン</button>
+      <button class="auth-tab" data-tab="register">新規登録</button>
+      <button class="auth-tab" data-tab="forgot">パスワードを忘れた場合</button>
+    </div>
+
+    <form class="auth-form active" id="login-form" data-tab="login">
+      <input type="email" id="login-email" placeholder="メールアドレス" required autocomplete="username">
+      <div class="pw-field">
+        <input type="password" id="login-password" placeholder="パスワード" required autocomplete="current-password">
+        <button type="button" class="pw-toggle" data-target="login-password">表示</button>
+      </div>
+      <button type="submit" class="btn-primary">ログイン</button>
+      <p class="auth-msg" id="login-msg"></p>
+    </form>
+
+    <form class="auth-form" id="register-form" data-tab="register">
+      <input type="text" id="register-nickname" placeholder="ニックネーム" required maxlength="20">
+      <input type="email" id="register-email" placeholder="メールアドレス" required autocomplete="username">
+      <button type="submit" class="btn-primary">登録して仮パスワードを受け取る</button>
+      <p class="auth-msg" id="register-msg"></p>
+    </form>
+
+    <form class="auth-form" id="forgot-form" data-tab="forgot">
+      <input type="email" id="forgot-email" placeholder="メールアドレス" required>
+      <button type="submit" class="btn-primary">仮パスワードを再発行</button>
+      <p class="auth-msg" id="forgot-msg"></p>
+    </form>
+
+    <form class="auth-form" id="forced-pw-form" data-tab="forced">
+      <p class="lede small">仮パスワードでログインしました。新しいパスワードを設定してください。</p>
+      <div class="pw-field">
+        <input type="password" id="forced-new-password" placeholder="新しいパスワード（8文字以上）" required minlength="8">
+        <button type="button" class="pw-toggle" data-target="forced-new-password">表示</button>
+      </div>
+      <div class="pw-field">
+        <input type="password" id="forced-new-password2" placeholder="新しいパスワード（確認）" required minlength="8">
+        <button type="button" class="pw-toggle" data-target="forced-new-password2">表示</button>
+      </div>
+      <button type="submit" class="btn-primary">パスワードを設定する</button>
+      <p class="auth-msg" id="forced-pw-msg"></p>
+    </form>
+  </div>
+</div>
+
+<!-- アプリ本体 -->
+<div class="app-screen" id="app-screen" hidden>
 <header class="topbar">
   <div class="brand">
     <span class="brand-mark">3</span>
     <span class="brand-name">Speak in 3</span>
+    <div class="account-area">
+      <button class="account-btn" id="account-btn"><span id="account-nickname">-</span> ▾</button>
+      <div class="account-menu" id="account-menu" hidden>
+        <button type="button" id="menu-nickname-btn">ニックネーム変更</button>
+        <button type="button" id="menu-password-btn">パスワード変更</button>
+        <button type="button" id="menu-logout-btn">ログアウト</button>
+      </div>
+    </div>
   </div>
   <ol class="stepper" id="stepper">
     <li data-step="theme" class="active">テーマ</li>
@@ -143,6 +206,12 @@
   <button class="nav-btn nav-restart" id="nav-restart">最初から</button>
   <button class="nav-btn nav-next" id="nav-next">次へ進む →</button>
 </footer>
+</div><!-- /app-screen -->
+
+<!-- アカウント設定モーダル -->
+<div class="modal-overlay" id="modal-overlay" hidden>
+  <div class="modal-card" id="modal-card"></div>
+</div>
 
 <script src="script.js"></script>
 </body>

@@ -9,6 +9,263 @@ document.getElementById("wait-time-select").addEventListener("change", (e) => {
   RESPONSE_LIMIT_SEC = Number(e.target.value);
 });
 
+/* ============================================================
+   会員認証
+   ============================================================ */
+let auth = { sessionToken: null, nickname: null };
+
+function rawCallBackend(action, payload){
+  return fetch(GAS_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({ action, ...payload })
+  }).then(async res => {
+    if (!res.ok) throw new Error("サーバーエラー: " + res.status);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+  });
+}
+
+function showAuthMsg(id, text, ok){
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.classList.toggle("ok", !!ok);
+}
+
+/* --- タブ切り替え --- */
+document.querySelectorAll(".auth-tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".auth-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".auth-form").forEach(f => f.classList.remove("active"));
+    tab.classList.add("active");
+    document.querySelector(`.auth-form[data-tab="${tab.dataset.tab}"]`).classList.add("active");
+  });
+});
+
+/* --- パスワード表示/非表示切り替え --- */
+document.querySelectorAll(".pw-toggle").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const input = document.getElementById(btn.dataset.target);
+    const showing = input.type === "text";
+    input.type = showing ? "password" : "text";
+    btn.textContent = showing ? "表示" : "非表示";
+  });
+});
+
+/* --- ログイン --- */
+document.getElementById("login-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  showAuthMsg("login-msg", "");
+  const email = document.getElementById("login-email").value.trim();
+  const password = document.getElementById("login-password").value;
+  try{
+    const data = await rawCallBackend("login", { email, password });
+    if (data.mustChangePassword){
+      auth.sessionToken = data.sessionToken; // 強制変更フォームで使う
+      switchAuthTab("forced");
+      return;
+    }
+    completeLogin(data.sessionToken, data.nickname);
+  }catch(err){
+    showAuthMsg("login-msg", err.message);
+  }
+});
+
+/* --- 新規登録 --- */
+document.getElementById("register-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  showAuthMsg("register-msg", "");
+  const nickname = document.getElementById("register-nickname").value.trim();
+  const email = document.getElementById("register-email").value.trim();
+  try{
+    await rawCallBackend("register", { nickname, email });
+    showAuthMsg("register-msg", "登録しました。メールに届いた仮パスワードでログインしてください。", true);
+    document.getElementById("register-form").reset();
+  }catch(err){
+    showAuthMsg("register-msg", err.message);
+  }
+});
+
+/* --- パスワード再発行 --- */
+document.getElementById("forgot-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  showAuthMsg("forgot-msg", "");
+  const email = document.getElementById("forgot-email").value.trim();
+  try{
+    await rawCallBackend("forgotPassword", { email });
+    showAuthMsg("forgot-msg", "仮パスワードを再発行しました。メールをご確認ください。", true);
+    document.getElementById("forgot-form").reset();
+  }catch(err){
+    showAuthMsg("forgot-msg", err.message);
+  }
+});
+
+/* --- 初回ログイン時の強制パスワード変更 --- */
+document.getElementById("forced-pw-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  showAuthMsg("forced-pw-msg", "");
+  const p1 = document.getElementById("forced-new-password").value;
+  const p2 = document.getElementById("forced-new-password2").value;
+  if (p1 !== p2){ showAuthMsg("forced-pw-msg", "新しいパスワードが一致しません"); return; }
+  try{
+    await rawCallBackend("changePassword", { sessionToken: auth.sessionToken, newPassword: p1 });
+    const me = await rawCallBackend("checkSession", { sessionToken: auth.sessionToken });
+    document.getElementById("forced-pw-form").reset();
+    completeLogin(auth.sessionToken, me.nickname);
+  }catch(err){
+    showAuthMsg("forced-pw-msg", err.message);
+  }
+});
+
+function switchAuthTab(tabName){
+  document.querySelectorAll(".auth-tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".auth-form").forEach(f => f.classList.remove("active"));
+  const tabBtn = document.querySelector(`.auth-tab[data-tab="${tabName}"]`);
+  if (tabBtn) tabBtn.classList.add("active");
+  document.querySelector(`.auth-form[data-tab="${tabName}"]`).classList.add("active");
+}
+
+function completeLogin(sessionToken, nickname){
+  auth.sessionToken = sessionToken;
+  auth.nickname = nickname;
+  localStorage.setItem("speakin3_session", sessionToken);
+  document.getElementById("account-nickname").textContent = nickname;
+  document.getElementById("auth-screen").hidden = true;
+  document.getElementById("app-screen").hidden = false;
+  goToView("theme");
+}
+
+function logout(){
+  if (auth.sessionToken) rawCallBackend("logout", { sessionToken: auth.sessionToken }).catch(() => {});
+  auth = { sessionToken: null, nickname: null };
+  localStorage.removeItem("speakin3_session");
+  document.getElementById("app-screen").hidden = true;
+  document.getElementById("auth-screen").hidden = false;
+  switchAuthTab("login");
+}
+
+/* --- アカウントメニュー --- */
+document.getElementById("account-btn").addEventListener("click", () => {
+  document.getElementById("account-menu").hidden = !document.getElementById("account-menu").hidden;
+});
+document.addEventListener("click", (e) => {
+  const menu = document.getElementById("account-menu");
+  if (!menu.hidden && !menu.contains(e.target) && e.target.id !== "account-btn") menu.hidden = true;
+});
+document.getElementById("menu-logout-btn").addEventListener("click", () => {
+  document.getElementById("account-menu").hidden = true;
+  if (confirm("ログアウトしますか？")) logout();
+});
+document.getElementById("menu-nickname-btn").addEventListener("click", () => {
+  document.getElementById("account-menu").hidden = true;
+  openNicknameModal();
+});
+document.getElementById("menu-password-btn").addEventListener("click", () => {
+  document.getElementById("account-menu").hidden = true;
+  openPasswordModal();
+});
+
+/* --- 汎用モーダル --- */
+function openModal(html){
+  document.getElementById("modal-card").innerHTML = html;
+  document.getElementById("modal-overlay").hidden = false;
+}
+function closeModal(){
+  document.getElementById("modal-overlay").hidden = true;
+  document.getElementById("modal-card").innerHTML = "";
+}
+document.getElementById("modal-overlay").addEventListener("click", (e) => {
+  if (e.target.id === "modal-overlay") closeModal();
+});
+
+function openNicknameModal(){
+  openModal(`
+    <h3>ニックネーム変更</h3>
+    <div class="field">
+      <input type="text" id="modal-nickname" value="${escapeHtml(auth.nickname || "")}" maxlength="20">
+    </div>
+    <p class="auth-msg" id="modal-msg"></p>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="modal-cancel">キャンセル</button>
+      <button class="btn-primary" id="modal-save">保存</button>
+    </div>
+  `);
+  document.getElementById("modal-cancel").addEventListener("click", closeModal);
+  document.getElementById("modal-save").addEventListener("click", async () => {
+    const nickname = document.getElementById("modal-nickname").value.trim();
+    if (!nickname){ showAuthMsg("modal-msg", "ニックネームを入力してください"); return; }
+    try{
+      const data = await callBackend("changeNickname", { nickname });
+      auth.nickname = data.nickname;
+      document.getElementById("account-nickname").textContent = data.nickname;
+      closeModal();
+    }catch(err){
+      showAuthMsg("modal-msg", err.message);
+    }
+  });
+}
+
+function openPasswordModal(){
+  openModal(`
+    <h3>パスワード変更</h3>
+    <div class="field">
+      <div class="pw-field">
+        <input type="password" id="modal-old-pw" placeholder="現在のパスワード">
+        <button type="button" class="pw-toggle" data-target="modal-old-pw">表示</button>
+      </div>
+      <div class="pw-field">
+        <input type="password" id="modal-new-pw" placeholder="新しいパスワード（8文字以上）" minlength="8">
+        <button type="button" class="pw-toggle" data-target="modal-new-pw">表示</button>
+      </div>
+      <div class="pw-field">
+        <input type="password" id="modal-new-pw2" placeholder="新しいパスワード（確認）" minlength="8">
+        <button type="button" class="pw-toggle" data-target="modal-new-pw2">表示</button>
+      </div>
+    </div>
+    <p class="auth-msg" id="modal-msg"></p>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="modal-cancel">キャンセル</button>
+      <button class="btn-primary" id="modal-save">変更する</button>
+    </div>
+  `);
+  document.querySelectorAll("#modal-card .pw-toggle").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const input = document.getElementById(btn.dataset.target);
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      btn.textContent = showing ? "表示" : "非表示";
+    });
+  });
+  document.getElementById("modal-cancel").addEventListener("click", closeModal);
+  document.getElementById("modal-save").addEventListener("click", async () => {
+    const oldPw = document.getElementById("modal-old-pw").value;
+    const p1 = document.getElementById("modal-new-pw").value;
+    const p2 = document.getElementById("modal-new-pw2").value;
+    if (p1 !== p2){ showAuthMsg("modal-msg", "新しいパスワードが一致しません"); return; }
+    try{
+      await callBackend("changePassword", { oldPassword: oldPw, newPassword: p1 });
+      showAuthMsg("modal-msg", "変更しました", true);
+      setTimeout(closeModal, 900);
+    }catch(err){
+      showAuthMsg("modal-msg", err.message);
+    }
+  });
+}
+
+/* --- 保存済みセッションの復元 --- */
+(async function restoreSession(){
+  const saved = localStorage.getItem("speakin3_session");
+  if (!saved) return;
+  try{
+    const me = await rawCallBackend("checkSession", { sessionToken: saved });
+    if (me.ok) completeLogin(saved, me.nickname);
+    else localStorage.removeItem("speakin3_session");
+  }catch(err){
+    localStorage.removeItem("speakin3_session");
+  }
+})();
+
 let state = {
   theme: "",
   words: [],
@@ -97,7 +354,7 @@ async function callBackend(action, payload){
   const res = await fetch(GAS_URL, {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
-    body: JSON.stringify({ action, ...payload })
+    body: JSON.stringify({ action, sessionToken: auth.sessionToken, ...payload })
   });
   if (!res.ok) throw new Error("サーバーエラー: " + res.status);
   const data = await res.json();
@@ -507,6 +764,11 @@ async function togglePastList(){
   const listEl = document.getElementById("past-list");
   if (!listEl.hidden){ listEl.hidden = true; return; }
   listEl.hidden = false;
+  await refreshPastList();
+}
+
+async function refreshPastList(){
+  const listEl = document.getElementById("past-list");
   listEl.innerHTML = `<p class="past-loading">読み込み中…</p>`;
   try{
     const data = await callBackend("listSessions", {});
@@ -532,12 +794,56 @@ function renderPastList(sessions){
       <div class="past-actions">
         <button class="chip" data-action="reuse" data-index="${s.index}">もう一度話す</button>
         <button class="chip" data-action="view" data-index="${s.index}">評価を見る</button>
+        <button class="chip" data-action="edit" data-index="${s.index}" data-theme="${escapeHtml(s.theme)}">編集</button>
+        <button class="chip" data-action="delete" data-index="${s.index}">削除</button>
       </div>
     </div>
   `).join("");
   listEl.querySelectorAll(".chip[data-action]").forEach(btn => {
-    btn.addEventListener("click", () => handlePastAction(btn.dataset.action, Number(btn.dataset.index)));
+    btn.addEventListener("click", () => {
+      const action = btn.dataset.action;
+      const index = Number(btn.dataset.index);
+      if (action === "edit") openEditThemeModal(index, btn.dataset.theme);
+      else if (action === "delete") deletePastSession(index);
+      else handlePastAction(action, index);
+    });
   });
+}
+
+function openEditThemeModal(index, currentTheme){
+  openModal(`
+    <h3>テーマを編集</h3>
+    <div class="field">
+      <input type="text" id="modal-theme-edit" value="${escapeHtml(currentTheme)}" maxlength="40">
+    </div>
+    <p class="auth-msg" id="modal-msg"></p>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="modal-cancel">キャンセル</button>
+      <button class="btn-primary" id="modal-save">保存</button>
+    </div>
+  `);
+  document.getElementById("modal-cancel").addEventListener("click", closeModal);
+  document.getElementById("modal-save").addEventListener("click", async () => {
+    const newTheme = document.getElementById("modal-theme-edit").value.trim();
+    if (!newTheme){ showAuthMsg("modal-msg", "テーマを入力してください"); return; }
+    try{
+      await callBackend("updateSessionTheme", { index, newTheme });
+      closeModal();
+      refreshPastList();
+    }catch(err){
+      showAuthMsg("modal-msg", err.message);
+    }
+  });
+}
+
+async function deletePastSession(index){
+  if (!confirm("この記録を削除しますか？元に戻せません。")) return;
+  try{
+    await callBackend("deleteSession", { index });
+    refreshPastList();
+  }catch(err){
+    alert("削除に失敗しました: " + err.message);
+  }
 }
 
 async function handlePastAction(action, rowIndex){

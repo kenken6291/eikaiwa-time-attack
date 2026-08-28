@@ -24,7 +24,77 @@ body{
   *{animation-duration:0.01ms !important; transition-duration:0.01ms !important;}
 }
 
-/* ── Top bar / stepper ───────────────────────── */
+/* ── Auth screen ───────────────────────── */
+.auth-screen{
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  padding:24px 18px; background:var(--paper);
+}
+.auth-card{
+  width:100%; max-width:380px; background:var(--card); border:1px solid var(--line);
+  border-radius:18px; padding:26px 22px; box-shadow:0 10px 30px rgba(20,25,50,0.08);
+}
+.brand.center{justify-content:center; margin-bottom:20px;}
+.auth-tabs{display:flex; gap:6px; margin-bottom:18px; background:var(--paper); border-radius:11px; padding:4px;}
+.auth-tab{
+  flex:1; font-family:var(--font-body); font-weight:600; font-size:12.5px;
+  background:transparent; border:none; border-radius:8px; padding:9px 4px; cursor:pointer; color:var(--muted);
+}
+.auth-tab.active{background:var(--navy); color:#fff;}
+.auth-form{display:none; flex-direction:column; gap:10px;}
+.auth-form.active{display:flex;}
+.auth-form input[type="email"], .auth-form input[type="text"], .auth-form input[type="password"]{
+  font-family:var(--font-body); font-size:15px; padding:13px 14px;
+  border:1.5px solid var(--line); border-radius:11px; background:var(--paper); outline:none; width:100%;
+}
+.auth-form input:focus{border-color:var(--coral);}
+.pw-field{position:relative; display:flex; align-items:center;}
+.pw-field input{padding-right:64px;}
+.pw-toggle{
+  position:absolute; right:6px; font-family:var(--font-body); font-size:12px; font-weight:600;
+  background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 10px;
+  cursor:pointer; color:var(--navy);
+}
+.auth-msg{font-size:12.5px; min-height:16px; margin:2px 0 0; color:var(--coral);}
+.auth-msg.ok{color:var(--mint);}
+
+/* ── Account area (topbar) ───────────────────────── */
+.account-area{position:relative; margin-left:auto;}
+.account-btn{
+  font-family:var(--font-body); font-size:12.5px; font-weight:600; color:#fff;
+  background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25);
+  border-radius:999px; padding:6px 12px; cursor:pointer;
+}
+.account-menu{
+  position:absolute; right:0; top:calc(100% + 8px); z-index:30;
+  background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden;
+  min-width:160px; box-shadow:0 10px 24px rgba(20,25,50,0.14);
+}
+.account-menu button{
+  display:block; width:100%; text-align:left; font-family:var(--font-body); font-size:13px;
+  background:#fff; border:none; border-bottom:1px solid var(--line); color:var(--ink);
+  padding:11px 14px; cursor:pointer;
+}
+.account-menu button:last-child{border-bottom:none; color:var(--coral);}
+
+/* ── Modal ───────────────────────── */
+.modal-overlay{
+  position:fixed; inset:0; background:rgba(22,33,62,0.5); z-index:40;
+  display:flex; align-items:center; justify-content:center; padding:20px;
+}
+.modal-card{
+  width:100%; max-width:380px; background:#fff; border-radius:16px; padding:22px;
+  max-height:85vh; overflow-y:auto;
+}
+.modal-card h3{font-family:var(--font-display); font-size:17px; margin:0 0 14px;}
+.modal-card .field{display:flex; flex-direction:column; gap:10px; margin-bottom:12px;}
+.modal-card input[type="text"], .modal-card input[type="password"]{
+  font-family:var(--font-body); font-size:15px; padding:12px 14px;
+  border:1.5px solid var(--line); border-radius:10px; background:var(--paper); width:100%;
+}
+.modal-actions{display:flex; gap:8px; margin-top:14px;}
+.modal-actions .btn-primary, .modal-actions .btn-secondary{flex:1; margin:0;}
+
+/* ── App screen ───────────────────────── */
 .topbar{
   background:var(--navy);
   color:#fff;
