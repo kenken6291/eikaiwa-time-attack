@@ -268,6 +268,7 @@ function openPasswordModal(){
 
 let state = {
   theme: "",
+  transcriptSummary: "", // 音声フリートークを整理した文章（テキスト入力テーマの場合は空）
   words: [],
   quiz: [],
   quizIndex: 0,
@@ -525,6 +526,7 @@ async function startThemeFromTranscript(transcript){
   state.quizScore = 0;
   document.getElementById("study-theme-tag").textContent = "テーマを抽出中…";
   document.getElementById("word-grid").innerHTML = "";
+  document.getElementById("transcript-summary-card").hidden = true;
   document.getElementById("study-loader").hidden = false;
   document.getElementById("to-quiz-btn").hidden = true;
   goToView("study");
@@ -532,9 +534,11 @@ async function startThemeFromTranscript(transcript){
   try{
     const data = await callBackend("generateStudySetFromTranscript", { transcript });
     state.theme = data.theme || "フリートーク";
+    state.transcriptSummary = data.transcript_summary || "";
     state.words = data.words || [];
     state.quiz = data.quiz || [];
     document.getElementById("study-theme-tag").textContent = state.theme;
+    renderTranscriptSummary();
     renderWordGrid();
   }catch(err){
     document.getElementById("word-grid").innerHTML =
@@ -546,11 +550,13 @@ async function startThemeFromTranscript(transcript){
 
 async function startTheme(theme){
   state.theme = theme;
+  state.transcriptSummary = ""; // テキスト直接入力の場合は整理版なし
   state.talkHistory = [];
   state.quizIndex = 0;
   state.quizScore = 0;
   document.getElementById("study-theme-tag").textContent = theme;
   document.getElementById("word-grid").innerHTML = "";
+  document.getElementById("transcript-summary-card").hidden = true;
   document.getElementById("study-loader").hidden = false;
   document.getElementById("to-quiz-btn").hidden = true;
   goToView("study");
@@ -565,6 +571,16 @@ async function startTheme(theme){
       `<p style="color:var(--coral)">生成に失敗しました: ${escapeHtml(err.message)}</p>`;
   }finally{
     document.getElementById("study-loader").hidden = true;
+  }
+}
+
+function renderTranscriptSummary(){
+  const card = document.getElementById("transcript-summary-card");
+  if (state.transcriptSummary){
+    document.getElementById("transcript-summary-text").textContent = state.transcriptSummary;
+    card.hidden = false;
+  } else {
+    card.hidden = true;
   }
 }
 
@@ -929,9 +945,10 @@ async function runEvaluation(){
     });
     renderReview(data);
 
-    // ログをスプレッドシート＋Driveに保存（単語・四択も含めて後で再利用できるようにする）
+    // ログをスプレッドシート＋Driveに保存（単語・四択・整理済みの話した内容も含めて後で再利用できるようにする）
     callBackend("saveLog", {
       theme: state.theme,
+      transcriptSummary: state.transcriptSummary,
       words: state.words,
       quiz: state.quiz,
       history: state.talkHistory,
@@ -954,6 +971,15 @@ function renderReview(data){
   document.getElementById("review-natural").innerHTML =
     (data.natural_expressions || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
   document.getElementById("review-summary").textContent = data.summary || "";
+
+  const transcriptBlock = document.getElementById("review-transcript-block");
+  if (state.transcriptSummary){
+    document.getElementById("review-transcript-text").textContent = state.transcriptSummary;
+    transcriptBlock.hidden = false;
+  } else {
+    transcriptBlock.hidden = true;
+  }
+
   document.getElementById("review-card").hidden = false;
 }
 
@@ -1060,6 +1086,7 @@ async function handlePastAction(action, rowIndex){
     if (!s) throw new Error("記録の詳細データが見つかりませんでした");
 
     state.theme = s.theme || "";
+    state.transcriptSummary = s.transcriptSummary || "";
     state.words = s.words || [];
     state.quiz = s.quiz || [];
     state.quizIndex = 0;
@@ -1069,6 +1096,7 @@ async function handlePastAction(action, rowIndex){
     if (action === "reuse"){
       // 単語・例文・四択は保存済みデータをそのまま使う（AIを再度呼ばないのでクォータも節約できる）
       document.getElementById("study-theme-tag").textContent = state.theme + "（過去の記録）";
+      renderTranscriptSummary();
       renderWordGrid();
       goToView("study");
     } else {

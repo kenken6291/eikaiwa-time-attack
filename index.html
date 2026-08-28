@@ -144,6 +144,12 @@
   <section class="view" id="view-study">
     <h2 class="section-title">単語 &amp; 例文 <span class="theme-tag" id="study-theme-tag"></span></h2>
     <div class="loader" id="study-loader"><div class="ring"></div><p>AIが単語と例文を作っています…</p></div>
+
+    <div class="transcript-summary-card" id="transcript-summary-card" hidden>
+      <h3>話した内容（整理版）</h3>
+      <p id="transcript-summary-text"></p>
+    </div>
+
     <div class="word-grid" id="word-grid"></div>
     <button class="btn-primary next-btn" id="to-quiz-btn" hidden>四択テストに進む</button>
   </section>
@@ -219,6 +225,10 @@
     <div class="loader" id="review-loader"><div class="ring"></div><p>AIが会話を評価しています…</p></div>
     <div class="review-card" id="review-card" hidden>
       <div class="score-badge" id="score-badge">--</div>
+      <div class="review-block" id="review-transcript-block" hidden>
+        <h3>話した内容（整理版）</h3>
+        <p id="review-transcript-text"></p>
+      </div>
       <div class="review-block">
         <h3>文法の正確さ</h3>
         <p id="review-grammar"></p>
