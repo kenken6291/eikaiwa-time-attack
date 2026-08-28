@@ -26,22 +26,37 @@
 
 <main>
 
-  <!-- STEP 1: テーマ入力 -->
+  <!-- STEP 1: 音声でフリートーク→テーマ抽出 -->
   <section class="view active" id="view-theme">
     <div class="hero">
       <h1>今日は、なにを話す？</h1>
-      <p class="lede">好きなテーマを日本語で入れると、単語・例文・四択テストをAIがその場で作ります。そのあとは3秒以内に返す英会話タイムアタックへ。</p>
-      <form id="theme-form" class="theme-form">
-        <input type="text" id="theme-input" placeholder="例：カフェでの注文、旅行の予定、週末の予定" required>
-        <button type="submit" class="btn-primary">テーマで始める</button>
-      </form>
-      <div class="quick-themes">
-        <span>やってみる：</span>
-        <button class="chip" data-theme="カフェでの注文">カフェでの注文</button>
-        <button class="chip" data-theme="空港での手続き">空港での手続き</button>
-        <button class="chip" data-theme="週末の予定">週末の予定</button>
-        <button class="chip" data-theme="道案内">道案内</button>
+      <p class="lede">マイクを押して、日本語で自由に3分ほど話してください。話した内容から、AIがテーマを見つけて単語・例文・四択テストを作ります。</p>
+
+      <div class="record-panel">
+        <div class="record-timer">
+          <span id="record-elapsed">0:00</span>
+          <span class="record-sep">/</span>
+          <span>3:00</span>
+        </div>
+        <div class="bar record-bar"><div class="bar-fill" id="record-bar-fill"></div></div>
+
+        <button class="record-btn" id="record-btn" aria-label="録音を開始">
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        </button>
+        <p class="record-status" id="record-status">タップして話し始める</p>
+
+        <div class="transcript-box" id="transcript-box" hidden></div>
       </div>
+
+      <button class="btn-primary" id="use-transcript-btn" hidden>この内容でAIに教材を作らせる</button>
+
+      <div class="quick-themes">
+        <span>または、テーマを直接入力：</span>
+      </div>
+      <form id="theme-form" class="theme-form">
+        <input type="text" id="theme-input" placeholder="例：カフェでの注文、旅行の予定、週末の予定">
+        <button type="submit" class="btn-secondary" style="margin-top:0;">このテーマで始める</button>
+      </form>
     </div>
   </section>
 

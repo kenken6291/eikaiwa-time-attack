@@ -41,16 +41,121 @@ async function callBackend(action, payload){
 }
 
 /* ============================================================
-   STEP 1: テーマ入力
+   STEP 1: 音声フリートーク（最大3分）→ AIがテーマを抽出
    ============================================================ */
+const TALK_LIMIT_SEC = 180; // 3分
+const RecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+let themeRecognizer = null;
+let themeTimerInterval = null;
+let themeRecordStart = 0;
+let themeTranscriptFinal = "";
+let isRecording = false;
+
+const recordBtn = document.getElementById("record-btn");
+const recordStatus = document.getElementById("record-status");
+const transcriptBox = document.getElementById("transcript-box");
+const elapsedEl = document.getElementById("record-elapsed");
+const recordBarFill = document.getElementById("record-bar-fill");
+const useTranscriptBtn = document.getElementById("use-transcript-btn");
+
+recordBtn.addEventListener("click", () => {
+  if (!RecognitionCtor){
+    recordStatus.textContent = "この端末は音声認識に対応していません。下のテーマ入力欄をご利用ください。";
+    return;
+  }
+  isRecording ? stopRecording() : startRecording();
+});
+
+function startRecording(){
+  themeTranscriptFinal = "";
+  transcriptBox.hidden = false;
+  transcriptBox.textContent = "";
+  useTranscriptBtn.hidden = true;
+  isRecording = true;
+  themeRecordStart = performance.now();
+  recordBtn.classList.add("recording");
+  recordStatus.textContent = "聞いています…（もう一度タップで終了）";
+
+  themeRecognizer = new RecognitionCtor();
+  themeRecognizer.lang = "ja-JP";
+  themeRecognizer.continuous = true;
+  themeRecognizer.interimResults = true;
+
+  themeRecognizer.onresult = (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++){
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) themeTranscriptFinal += t;
+      else interim += t;
+    }
+    transcriptBox.textContent = themeTranscriptFinal + interim;
+    transcriptBox.scrollTop = transcriptBox.scrollHeight;
+  };
+  themeRecognizer.onerror = () => { /* 無音などは無視して継続 */ };
+  themeRecognizer.onend = () => {
+    // ブラウザが自動停止した場合、録音継続中なら再開する
+    if (isRecording) {
+      try{ themeRecognizer.start(); }catch(e){ /* 既に開始済み */ }
+    }
+  };
+
+  try{ themeRecognizer.start(); }catch(e){ /* noop */ }
+
+  themeTimerInterval = setInterval(() => {
+    const elapsed = Math.floor((performance.now() - themeRecordStart) / 1000);
+    const remain = Math.max(0, TALK_LIMIT_SEC - elapsed);
+    const mm = String(Math.floor(elapsed / 60));
+    const ss = String(elapsed % 60).padStart(2, "0");
+    elapsedEl.textContent = `${mm}:${ss}`;
+    recordBarFill.style.width = `${Math.min(100, (elapsed / TALK_LIMIT_SEC) * 100)}%`;
+    if (remain <= 0) stopRecording();
+  }, 250);
+}
+
+function stopRecording(){
+  isRecording = false;
+  clearInterval(themeTimerInterval);
+  if (themeRecognizer){ try{ themeRecognizer.stop(); }catch(e){} }
+  recordBtn.classList.remove("recording");
+  recordStatus.textContent = "録音完了。内容を確認してAIに渡しましょう。";
+  useTranscriptBtn.hidden = themeTranscriptFinal.trim().length === 0;
+}
+
+useTranscriptBtn.addEventListener("click", () => {
+  const transcript = themeTranscriptFinal.trim();
+  if (transcript) startThemeFromTranscript(transcript);
+});
+
 document.getElementById("theme-form").addEventListener("submit", e => {
   e.preventDefault();
   const theme = document.getElementById("theme-input").value.trim();
   if (theme) startTheme(theme);
 });
-document.querySelectorAll(".chip").forEach(chip => {
-  chip.addEventListener("click", () => startTheme(chip.dataset.theme));
-});
+
+async function startThemeFromTranscript(transcript){
+  state.talkHistory = [];
+  state.quizIndex = 0;
+  state.quizScore = 0;
+  document.getElementById("study-theme-tag").textContent = "テーマを抽出中…";
+  document.getElementById("word-grid").innerHTML = "";
+  document.getElementById("study-loader").hidden = false;
+  document.getElementById("to-quiz-btn").hidden = true;
+  goToView("study");
+
+  try{
+    const data = await callBackend("generateStudySetFromTranscript", { transcript });
+    state.theme = data.theme || "フリートーク";
+    state.words = data.words || [];
+    state.quiz = data.quiz || [];
+    document.getElementById("study-theme-tag").textContent = state.theme;
+    renderWordGrid();
+  }catch(err){
+    document.getElementById("word-grid").innerHTML =
+      `<p style="color:var(--coral)">生成に失敗しました: ${escapeHtml(err.message)}</p>`;
+  }finally{
+    document.getElementById("study-loader").hidden = true;
+  }
+}
 
 async function startTheme(theme){
   state.theme = theme;
