@@ -32,6 +32,17 @@
       <h1>今日は、なにを話す？</h1>
       <p class="lede">マイクを押して、日本語で自由に3分ほど話してください。話した内容から、AIがテーマを見つけて単語・例文・四択テストを作ります。</p>
 
+      <div class="settings-row">
+        <label for="wait-time-select">応答までの待ち時間</label>
+        <select id="wait-time-select">
+          <option value="1">1秒</option>
+          <option value="2">2秒</option>
+          <option value="3" selected>3秒（標準）</option>
+          <option value="5">5秒</option>
+          <option value="8">8秒</option>
+        </select>
+      </div>
+
       <div class="record-panel">
         <div class="record-timer">
           <span id="record-elapsed">0:00</span>
@@ -57,6 +68,11 @@
         <input type="text" id="theme-input" placeholder="例：カフェでの注文、旅行の予定、週末の予定">
         <button type="submit" class="btn-secondary" style="margin-top:0;">このテーマで始める</button>
       </form>
+
+      <div class="past-panel">
+        <button class="btn-secondary" id="show-past-btn">過去の記録から選ぶ</button>
+        <div class="past-list" id="past-list" hidden></div>
+      </div>
     </div>
   </section>
 
@@ -79,7 +95,7 @@
   <!-- STEP 4: 会話タイムアタック -->
   <section class="view" id="view-talk">
     <h2 class="section-title">会話タイムアタック</h2>
-    <p class="lede small">AIの発話が終わったら、<strong>3秒以内</strong>にマイクへ向かって答えて。</p>
+    <p class="lede small">AIの発話が終わったら、<strong id="wait-time-label">3秒</strong>以内にマイクへ向かって答えて。</p>
     <div class="talk-stage">
       <div class="ai-line" id="ai-line">準備中…</div>
       <div class="mic-wrap">

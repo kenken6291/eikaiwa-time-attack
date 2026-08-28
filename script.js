@@ -3,7 +3,11 @@
    GASウェブアプリのURLをここに設定してください
    ============================================================ */
 const GAS_URL = "https://script.google.com/macros/s/AKfycbwaIg_BJ5AP_rAwYknfQY69pyssjs90YAohZMo8daOjtNQzE1IH6PY-gKGrGYSSS0619Q/exec";
-const RESPONSE_LIMIT_SEC = 3; // タイムアタックの制限時間（秒）
+let RESPONSE_LIMIT_SEC = 3; // タイムアタックの制限時間（秒）— 画面上のセレクトで変更可能
+
+document.getElementById("wait-time-select").addEventListener("change", (e) => {
+  RESPONSE_LIMIT_SEC = Number(e.target.value);
+});
 
 let state = {
   theme: "",
@@ -324,6 +328,7 @@ function speak(text){
 }
 
 async function startConversation(){
+  document.getElementById("wait-time-label").textContent = RESPONSE_LIMIT_SEC + "秒";
   document.getElementById("talk-log").innerHTML = "";
   document.getElementById("you-line").textContent = "\u00A0";
   const opener = `Let's talk about ${state.theme}. Are you ready?`;
@@ -458,16 +463,13 @@ async function runEvaluation(){
       quizScore: state.quizScore,
       quizTotal: state.quiz.length
     });
-    document.getElementById("score-badge").textContent = data.score;
-    document.getElementById("review-grammar").textContent = data.grammar_feedback;
-    document.getElementById("review-natural").innerHTML =
-      (data.natural_expressions || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
-    document.getElementById("review-summary").textContent = data.summary;
-    document.getElementById("review-card").hidden = false;
+    renderReview(data);
 
-    // ログをスプレッドシート＋Driveに保存
+    // ログをスプレッドシート＋Driveに保存（単語・四択も含めて後で再利用できるようにする）
     callBackend("saveLog", {
       theme: state.theme,
+      words: state.words,
+      quiz: state.quiz,
       history: state.talkHistory,
       quizScore: state.quizScore,
       quizTotal: state.quiz.length,
@@ -482,10 +484,88 @@ async function runEvaluation(){
   }
 }
 
+function renderReview(data){
+  document.getElementById("score-badge").textContent = data.score ?? "--";
+  document.getElementById("review-grammar").textContent = data.grammar_feedback || "";
+  document.getElementById("review-natural").innerHTML =
+    (data.natural_expressions || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
+  document.getElementById("review-summary").textContent = data.summary || "";
+  document.getElementById("review-card").hidden = false;
+}
+
 document.getElementById("restart-btn").addEventListener("click", () => {
   document.getElementById("theme-input").value = "";
   goToView("theme");
 });
+
+/* ============================================================
+   過去の記録から選ぶ
+   ============================================================ */
+document.getElementById("show-past-btn").addEventListener("click", togglePastList);
+
+async function togglePastList(){
+  const listEl = document.getElementById("past-list");
+  if (!listEl.hidden){ listEl.hidden = true; return; }
+  listEl.hidden = false;
+  listEl.innerHTML = `<p class="past-loading">読み込み中…</p>`;
+  try{
+    const data = await callBackend("listSessions", {});
+    renderPastList(data.sessions || []);
+  }catch(err){
+    listEl.innerHTML = `<p style="color:var(--coral)">読み込みに失敗しました: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderPastList(sessions){
+  const listEl = document.getElementById("past-list");
+  if (sessions.length === 0){
+    listEl.innerHTML = `<p class="past-empty">まだ記録がありません。</p>`;
+    return;
+  }
+  listEl.innerHTML = sessions.map(s => `
+    <div class="past-item">
+      <div class="past-item-head">
+        <span class="past-date">${escapeHtml(s.date)}</span>
+        <span class="past-score">${s.score !== "" && s.score != null ? s.score + "点" : "-"}</span>
+      </div>
+      <div class="past-theme">${escapeHtml(s.theme)}</div>
+      <div class="past-actions">
+        <button class="chip" data-action="reuse" data-index="${s.index}">もう一度話す</button>
+        <button class="chip" data-action="view" data-index="${s.index}">評価を見る</button>
+      </div>
+    </div>
+  `).join("");
+  listEl.querySelectorAll(".chip[data-action]").forEach(btn => {
+    btn.addEventListener("click", () => handlePastAction(btn.dataset.action, Number(btn.dataset.index)));
+  });
+}
+
+async function handlePastAction(action, rowIndex){
+  try{
+    const data = await callBackend("loadSession", { index: rowIndex });
+    const s = data.session;
+    if (!s) throw new Error("記録の詳細データが見つかりませんでした");
+
+    state.theme = s.theme || "";
+    state.words = s.words || [];
+    state.quiz = s.quiz || [];
+    state.quizIndex = 0;
+    state.quizScore = s.quizScore || 0;
+    state.talkHistory = s.history || [];
+
+    if (action === "reuse"){
+      // 単語・例文・四択は保存済みデータをそのまま使う（AIを再度呼ばないのでクォータも節約できる）
+      document.getElementById("study-theme-tag").textContent = state.theme + "（過去の記録）";
+      renderWordGrid();
+      goToView("study");
+    } else {
+      goToView("review");
+      renderReview(s.evaluation || {});
+    }
+  }catch(err){
+    alert("読み込みに失敗しました: " + err.message);
+  }
+}
 
 /* ---------- utility ---------- */
 function escapeHtml(str){
