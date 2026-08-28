@@ -759,7 +759,7 @@ function beginNormalListen(){
 async function continueNormalConversation(){
   if (normalTimeUp){ endNormalConversation(); return; }
   try{
-    const data = await callBackendWithRetry("chatReply", { theme: state.theme, history: normalHistory }, 1);
+    const data = await callBackendWithRetry("normalChatReply", { theme: state.theme, history: normalHistory }, 1);
     await pushNormalAiLine(data.reply);
   }catch(err){
     await pushNormalAiLine("Sorry, could you say that again?");
