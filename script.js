@@ -347,13 +347,26 @@ async function continueConversation(){
     return;
   }
   try{
-    const data = await callBackend("chatReply", {
+    const data = await callBackendWithRetry("chatReply", {
       theme: state.theme,
       history: state.talkHistory
-    });
+    }, 1);
     await pushAiLine(data.reply);
   }catch(err){
-    document.getElementById("ai-line").textContent = "エラー: " + err.message;
+    // Geminiが一時的に混雑していても会話を止めない
+    await pushAiLine("Sorry, could you say that again?");
+  }
+}
+
+async function callBackendWithRetry(action, payload, retries){
+  try{
+    return await callBackend(action, payload);
+  }catch(err){
+    if (retries > 0){
+      await new Promise(r => setTimeout(r, 900));
+      return callBackendWithRetry(action, payload, retries - 1);
+    }
+    throw err;
   }
 }
 async function pushAiLineNoListen(text){
