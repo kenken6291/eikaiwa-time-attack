@@ -25,7 +25,68 @@ function goToView(step){
     li.classList.toggle("active", i === idx);
     li.classList.toggle("done", i < idx);
   });
+  updateNavVisibility();
 }
+
+/* ---------- 下部ナビ（前へ戻る／次へ進む／最初から）---------- */
+function currentStep(){
+  return document.querySelector(".view.active").id.replace("view-", "");
+}
+function updateNavVisibility(){
+  const idx = STEP_ORDER.indexOf(currentStep());
+  document.getElementById("nav-back").style.visibility = idx > 0 ? "visible" : "hidden";
+  document.getElementById("nav-next").style.visibility =
+    (idx > 0 && idx < STEP_ORDER.length - 1) ? "visible" : "hidden";
+}
+function stopActiveStepProcesses(){
+  if (typeof isRecording !== "undefined" && isRecording) stopRecording();
+  clearInterval(countdownTimer);
+  clearInterval(themeTimerInterval);
+  if (recognizer){ try{ recognizer.stop(); }catch(e){} }
+  if (themeRecognizer){ try{ themeRecognizer.stop(); }catch(e){} }
+  synth && synth.cancel();
+}
+
+document.getElementById("nav-back").addEventListener("click", () => {
+  const idx = STEP_ORDER.indexOf(currentStep());
+  if (idx <= 0) return;
+  stopActiveStepProcesses();
+  goToView(STEP_ORDER[idx - 1]);
+});
+
+document.getElementById("nav-next").addEventListener("click", () => {
+  const cur = currentStep();
+  const idx = STEP_ORDER.indexOf(cur);
+  if (idx < 0 || idx >= STEP_ORDER.length - 1) return;
+  stopActiveStepProcesses();
+
+  if (cur === "study"){
+    goToView("quiz");
+    if (state.quiz.length) renderQuizQuestion();
+    else document.getElementById("quiz-card").innerHTML = "<p>テストがまだ生成されていません。テーマ入力からやり直してください。</p>";
+  } else if (cur === "quiz"){
+    goToView("talk");
+    startConversation();
+  } else if (cur === "talk"){
+    goToView("review");
+    runEvaluation();
+  }
+});
+
+document.getElementById("nav-restart").addEventListener("click", () => {
+  if (!confirm("最初からやり直しますか？ここまでの内容は失われます。")) return;
+  stopActiveStepProcesses();
+  state = { theme:"", words:[], quiz:[], quizIndex:0, quizScore:0, talkHistory:[], sessionId:null };
+  themeTranscriptFinal = "";
+  document.getElementById("theme-input").value = "";
+  document.getElementById("transcript-box").hidden = true;
+  document.getElementById("transcript-box").textContent = "";
+  document.getElementById("use-transcript-btn").hidden = true;
+  document.getElementById("record-status").textContent = "タップして話し始める";
+  document.getElementById("record-elapsed").textContent = "0:00";
+  document.getElementById("record-bar-fill").style.width = "0%";
+  goToView("theme");
+});
 
 /* ---------- GAS呼び出し（text/plainでPOSTしCORSを回避）---------- */
 async function callBackend(action, payload){

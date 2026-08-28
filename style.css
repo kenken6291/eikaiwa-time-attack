@@ -54,7 +54,27 @@ body{
 .stepper li.active{ color:var(--navy); background:var(--mint); border-color:var(--mint); font-weight:600;}
 .stepper li.done{ color:#fff; background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.3);}
 
-main{max-width:640px; margin:0 auto; padding:22px 18px 60px;}
+main{max-width:640px; margin:0 auto; padding:22px 18px 100px;}
+
+/* ── Bottom nav ───────────────────────── */
+.bottom-nav{
+  position:fixed; left:0; right:0; bottom:0; z-index:20;
+  background:#fff; border-top:1px solid var(--line);
+  display:flex; gap:8px; align-items:center; justify-content:space-between;
+  padding:10px 14px calc(10px + env(safe-area-inset-bottom));
+  max-width:640px; margin:0 auto;
+  box-shadow:0 -4px 16px rgba(20,25,50,0.06);
+}
+.nav-btn{
+  font-family:var(--font-body); font-weight:600; font-size:13.5px;
+  border-radius:10px; padding:11px 14px; cursor:pointer; border:1.5px solid var(--line);
+  background:var(--paper); color:var(--ink); white-space:nowrap;
+}
+.nav-back{flex:1;}
+.nav-next{flex:1; background:var(--navy); border-color:var(--navy); color:#fff;}
+.nav-restart{
+  flex:0 0 auto; background:transparent; border-color:transparent; color:var(--coral);
+}
 
 .view{display:none;}
 .view.active{display:block; animation:rise 0.35s ease both;}
