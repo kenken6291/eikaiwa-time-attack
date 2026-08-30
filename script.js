@@ -425,9 +425,9 @@ function rebuildTalkLog(){
 }
 
 /* ---------- GAS呼び出し（text/plainでPOSTしCORSを回避）---------- */
-async function callBackend(action, payload){
+async function callBackend(action, payload, timeoutMs = 12000){
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12秒でタイムアウト
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   let res;
   try{
     res = await fetch(GAS_URL, {
@@ -552,7 +552,7 @@ async function startThemeFromTranscript(transcript){
   goToView("study");
 
   try{
-    const data = await callBackend("generateStudySetFromTranscript", { transcript });
+    const data = await callBackend("generateStudySetFromTranscript", { transcript }, 40000);
     state.theme = data.theme || "フリートーク";
     state.transcriptSummary = data.transcript_summary || "";
     state.words = data.words || [];
@@ -583,7 +583,7 @@ async function startTheme(theme){
   goToView("study");
 
   try{
-    const data = await callBackend("generateStudySet", { theme });
+    const data = await callBackend("generateStudySet", { theme }, 40000);
     state.words = data.words || [];
     state.quiz = data.quiz || [];
     renderWordGrid();
@@ -1134,7 +1134,7 @@ async function runEvaluation(){
       history: state.talkHistory,
       quizScore: state.quizScore,
       quizTotal: state.quiz.length
-    });
+    }, 40000);
     renderReview(data);
 
     // ログをスプレッドシート＋Driveに保存（単語・四択・整理済みの話した内容も含めて後で再利用できるようにする）
