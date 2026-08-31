@@ -967,6 +967,7 @@ function isLikelyEcho(userText, aiText){
 }
 
 async function startConversation(){
+  state.talkHistory = []; // 呼び出し元に関わらず、必ず新しい会話として始める
   document.getElementById("talk-theme-tag").textContent = state.theme;
   document.getElementById("wait-time-label").textContent = RESPONSE_LIMIT_SEC + "秒";
   document.getElementById("talk-log").innerHTML = "";
@@ -1231,6 +1232,9 @@ document.getElementById("restart-btn").addEventListener("click", () => {
   state.transcriptSummary = "";
   state.words = [];
   state.quiz = [];
+  state.quizIndex = 0;
+  state.quizScore = 0;
+  state.talkHistory = [];
   clearProgress();
   goToView("theme");
 });
