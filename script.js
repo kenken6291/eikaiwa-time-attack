@@ -730,6 +730,7 @@ document.getElementById("normal-start-btn").addEventListener("click", () => {
   document.getElementById("normal-start-btn").hidden = true;
   document.getElementById("normal-duration-row").hidden = true;
   document.getElementById("to-talk-from-normal-btn").hidden = true;
+  document.getElementById("restart-normal-btn").hidden = true;
   document.getElementById("normal-stage").hidden = false;
 
   normalStart = performance.now();
@@ -889,7 +890,17 @@ function endNormalConversation(){
   document.getElementById("normal-mic-indicator").classList.remove("listening");
   document.getElementById("normal-ai-line").textContent = "お疲れさま！通常会話はここで終了です。";
   document.getElementById("to-talk-from-normal-btn").hidden = false;
+  document.getElementById("restart-normal-btn").hidden = false;
 }
+
+document.getElementById("restart-normal-btn").addEventListener("click", () => {
+  // 設定画面（会話時間の選択）に戻し、もう一度始められるようにする
+  document.getElementById("normal-stage").hidden = true;
+  document.getElementById("normal-start-btn").hidden = false;
+  document.getElementById("normal-duration-row").hidden = false;
+  document.getElementById("to-talk-from-normal-btn").hidden = true;
+  document.getElementById("restart-normal-btn").hidden = true;
+});
 
 document.getElementById("to-talk-from-normal-btn").addEventListener("click", () => {
   goToView("talk");
