@@ -788,43 +788,82 @@ function beginNormalListen(){
   }
   synth && synth.cancel(); // Android等でTTSが完全に止まっていない状態を防ぐ保険
   const indicator = document.getElementById("normal-mic-indicator");
+
   let handled = false;
+  let accumulatedFinal = ""; // 複数文をまとめて蓄積する
+  let lastActivity = performance.now();
+  const SILENCE_END_MS = 1500; // 発話後、この時間無音が続いたら「話し終わった」とみなす
+  let silenceCheckInterval = null;
 
-  normalRecognizer = new SpeechRecognition();
-  normalRecognizer.lang = "en-US";
-  normalRecognizer.interimResults = true;
-  normalRecognizer.continuous = true; // 話し始めてすぐ打ち切られないよう、区切らずに聞き続ける
-
-  normalRecognizer.onresult = (e) => {
-    let finalText = "";
-    for (let i = e.resultIndex; i < e.results.length; i++){
-      if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
-    }
-    if (finalText.trim()){
-      const lastAi = normalHistory[normalHistory.length - 1];
-      if (lastAi && lastAi.role === "ai" && isLikelyEcho(finalText, lastAi.text)){
-        return; // AI自身の音声を拾っただけなので無視して聞き直す
-      }
-      handled = true;
-      document.getElementById("normal-you-line").textContent = finalText;
-      addNormalLogRow("you", finalText);
-      normalHistory.push({ role: "you", text: finalText });
-      indicator.classList.remove("listening");
-      continueNormalConversation();
-    }
-  };
-  normalRecognizer.onerror = () => { /* 無音などは onend 側で再試行 */ };
-  normalRecognizer.onend = () => {
+  function finalizeTurn(){
+    if (handled) return;
+    handled = true;
+    clearInterval(silenceCheckInterval);
+    if (normalRecognizer){ try{ normalRecognizer.stop(); }catch(e){} } // 確定後は確実に聞き取りを止め、以降の誤発火を防ぐ
+    const said = accumulatedFinal.trim();
+    document.getElementById("normal-you-line").textContent = said;
+    addNormalLogRow("you", said);
+    normalHistory.push({ role: "you", text: said });
     indicator.classList.remove("listening");
-    if (!handled && normalActive && !normalTimeUp){
+    continueNormalConversation();
+  }
+
+  function createRecognizer(){
+    const r = new SpeechRecognition();
+    r.lang = "en-US";
+    r.interimResults = true;
+    r.continuous = true; // 話し始めてすぐ打ち切られないよう、区切らずに聞き続ける
+    r.maxAlternatives = 1;
+
+    r.onspeechstart = () => { lastActivity = performance.now(); };
+
+    r.onresult = (e) => {
+      if (handled) return;
+      let hasActivity = false;
+      for (let i = e.resultIndex; i < e.results.length; i++){
+        const t = e.results[i][0].transcript;
+        if (!t.trim()) continue;
+        if (e.results[i].isFinal){
+          const lastAi = normalHistory[normalHistory.length - 1];
+          if (!accumulatedFinal && lastAi && lastAi.role === "ai" && isLikelyEcho(t, lastAi.text)){
+            continue; // AI自身の音声を拾っただけの最初の一言は無視
+          }
+          accumulatedFinal += (accumulatedFinal ? " " : "") + t.trim();
+        }
+        hasActivity = true;
+      }
+      if (hasActivity) lastActivity = performance.now();
+    };
+
+    r.onerror = () => {}; // 一時的なエラーはonend側の再試行に任せる
+
+    r.onend = () => {
+      indicator.classList.remove("listening");
+      if (handled || !normalActive || normalTimeUp) return;
+      const silentFor = performance.now() - lastActivity;
+      if (accumulatedFinal && silentFor > SILENCE_END_MS){
+        finalizeTurn();
+        return;
+      }
       setTimeout(() => {
         if (handled || !normalActive || normalTimeUp) return;
-        beginNormalListen();
+        normalRecognizer = createRecognizer();
+        try{ normalRecognizer.start(); indicator.classList.add("listening"); }catch(e){}
       }, 150);
-    }
-  };
+    };
+    return r;
+  }
 
+  normalRecognizer = createRecognizer();
   try{ normalRecognizer.start(); indicator.classList.add("listening"); }catch(e){}
+
+  // 話し終えて一定時間（1.5秒）無音が続いたら、複数文が終わったとみなして確定する
+  silenceCheckInterval = setInterval(() => {
+    if (handled){ clearInterval(silenceCheckInterval); return; }
+    if (accumulatedFinal && (performance.now() - lastActivity) > SILENCE_END_MS){
+      finalizeTurn();
+    }
+  }, 200);
 }
 
 async function continueNormalConversation(){
