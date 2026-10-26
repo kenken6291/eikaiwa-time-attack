@@ -11,6 +11,7 @@
  *    - PEPPER          : パスワードハッシュ化用の任意の固定文字列（例: 長いランダム文字列。無くても動くが設定推奨）
  *    - ADMIN_EMAILS    : 「みんなの話し相手」を登録・編集できる管理者のメールアドレス（会員登録したもの。複数はカンマ区切り）
  *    - PARTNER_FOLDER_ID : （任意）話し相手の写真を保存するフォルダID。未設定なら DRIVE_FOLDER_ID 内に「partners」フォルダを自動作成
+ *    - TTS_MODEL       : （任意）Gemini の声のモデル。未設定なら gemini-3.8-flash-tts
  * 2. デプロイ > 新しいデプロイ > ウェブアプリ
  *    実行ユーザー: 自分 / アクセスできるユーザー: 全員
  * 3. 発行されたURLを config.js の GAS_URL に貼り付け
@@ -20,7 +21,7 @@
  */
 
 /** サーバー（GAS）のバージョン — コードを変更したらここも更新する */
-const GAS_VERSION = "2.2.0";
+const GAS_VERSION = "2.5.0";
 const GAS_UPDATED = "2026-10-26";
 
 const PROPS = PropertiesService.getScriptProperties();
@@ -82,7 +83,7 @@ function doPost(e) {
     switch (req.action) {
       // --- バージョン情報（ログイン不要） ---
       case "getVersion":
-        result = { version: GAS_VERSION, updated: GAS_UPDATED, model: GEMINI_MODEL };
+        result = { version: GAS_VERSION, updated: GAS_UPDATED, model: GEMINI_MODEL, ttsModel: ttsModel() };
         break;
 
       // --- 会員認証（ログイン不要） ---
@@ -119,11 +120,15 @@ function doPost(e) {
         break;
       case "chatReply":
         requireSession(req.sessionToken);
-        result = chatReply(req.theme, req.history, stripLegacyDirective(req.context), req.lang, req.partnerName);
+        result = withSpeech(chatReply(req.theme, req.history, stripLegacyDirective(req.context), req.lang, req.partnerName, req.partnerProfile), req);
         break;
       case "normalChatReply":
         requireSession(req.sessionToken);
-        result = normalChatReply(req.theme, req.history, stripLegacyDirective(req.context), req.lang, req.partnerName);
+        result = withSpeech(normalChatReply(req.theme, req.history, stripLegacyDirective(req.context), req.lang, req.partnerName, req.partnerProfile), req);
+        break;
+      case "tts":
+        requireSession(req.sessionToken);
+        result = ttsAction(req);
         break;
       case "evaluateConversation":
         requireSession(req.sessionToken);
@@ -528,7 +533,8 @@ function finishChatReply(raw, fallbackText) {
 /**
  * タイムアタック用の応答生成。短く・毎回質問で返し、テンポよく続けることを優先する。
  */
-function chatReply(theme, history, context, lang, partnerName) {
+function chatReply(theme, history, context, lang, partnerName, profile) {
+  const P = cleanProfile(profile);
   const L = getLang(lang);
   const name = partnerName || "your partner";
   const transcript = historyToText(history, partnerName);
@@ -540,11 +546,13 @@ function chatReply(theme, history, context, lang, partnerName) {
 ${contextBlock}
 Language rules:
 - Speak ONLY in ${L.en} (${L.native}). Never use English${lang === "en" ? " other than plain English" : ""} or Japanese in your line.
-${L.note ? "- " + L.note + "\n" : ""}- Keep it very short: 1 sentence (about 12 words or fewer; for Chinese/Korean about 20 characters or fewer), simple beginner vocabulary.
+${L.note ? "- " + L.note + "\n" : ""}- Keep it very short: 1 sentence (about 12 words or fewer; for Chinese/Korean about 20 characters or fewer).
+- ${levelRule(P)}
 - Always end with a question to keep the conversation going.
 If the learner's last line says "(no response — timed out)" or "(skipped by user)", gently encourage them and ask the question again in a simpler way.
 If there is no conversation yet (see below), start with a short, specific opening line grounded in the background above (or the topic itself if no background is given).
 
+${personaBlock(P)}
 ${emotionRules()}
 
 Conversation so far:
@@ -559,7 +567,8 @@ Output ONLY this JSON, nothing else:
  * 通常会話用の応答生成。ユーザーが話した具体的な内容にきちんと反応し、
  * 実際の日常会話のように自然にやり取りを続けることを優先する（毎回質問で返す必要はない）。
  */
-function normalChatReply(theme, history, context, lang, partnerName) {
+function normalChatReply(theme, history, context, lang, partnerName, profile) {
+  const P = cleanProfile(profile);
   const L = getLang(lang);
   const name = partnerName || "your partner";
   const transcript = historyToText(history, partnerName);
@@ -574,13 +583,14 @@ Language rules:
 ${L.note ? "- " + L.note + "\n" : ""}
 Guidelines:
 - Read the learner's most recent line (and the background above, if given) carefully and respond directly to what they actually said — reference specific details they mentioned, react to their feelings, or build on their idea. Show clearly that you understood them, not just a generic reply.
-- Use simple, beginner-friendly vocabulary, but let the conversation flow like a real casual chat (1-2 short sentences per turn), not a rigid Q&A interview.
+- ${levelRule(P)} Let the conversation flow like a real casual chat (1-2 short sentences per turn), not a rigid Q&A interview.
 - You don't need to end every line with a question — sometimes just comment, agree, share a short related thought, or express interest, the way a friend naturally would.
 - Occasionally ask a natural follow-up question to keep the conversation going, but only when it fits naturally.
 - Stay related to the topic "${theme}", but let the conversation evolve naturally based on what the learner brings up.
 - If there is no conversation yet (see below), start with a short, specific opening line grounded in the background above (or the topic itself if no background is given).
 - If the learner's message seems unclear or like a speech-recognition error, respond warmly and gently ask them to say more, without making them feel embarrassed.
 
+${personaBlock(P)}
 ${emotionRules()}
 
 Conversation so far:
@@ -803,8 +813,9 @@ function getPartnersSheet() {
   let sheet = ss.getSheetByName("partners");
   if (!sheet) {
     sheet = ss.insertSheet("partners");
-    sheet.appendRow(["id", "scope", "ownerUserId", "name", "photosJson", "sort", "updatedAt"]);
+    sheet.appendRow(["id", "scope", "ownerUserId", "name", "photosJson", "sort", "updatedAt", "profileJson"]);
   }
+  if (sheet.getLastColumn() < 8) sheet.getRange(1, 8).setValue("profileJson"); // v2.3以前のシートに列を追加
   return sheet;
 }
 
@@ -832,18 +843,19 @@ function readPartners() {
   const sheet = getPartnersSheet();
   const last = sheet.getLastRow();
   if (last < 2) return [];
-  return sheet.getRange(2, 1, last - 1, 7).getValues().map((r, i) => {
-    let photos = {};
+  return sheet.getRange(2, 1, last - 1, 8).getValues().map((r, i) => {
+    let photos = {}, profile = {};
     try { photos = JSON.parse(r[4] || "{}") || {}; } catch (e) { photos = {}; }
+    try { profile = JSON.parse(r[7] || "{}") || {}; } catch (e) { profile = {}; }
     return { row: i + 2, id: String(r[0]), scope: String(r[1]), owner: String(r[2]), name: String(r[3]),
-             photos, sort: Number(r[5]) || 0, updatedAt: r[6] };
+             photos, sort: Number(r[5]) || 0, updatedAt: r[6], profile: cleanProfile(profile) };
   }).filter(p => p.id);
 }
 
 function partnerToClient(p) {
   const photos = {};
   Object.keys(p.photos).forEach(k => { if (p.photos[k]) photos[k] = partnerImgUrl(p.photos[k]); });
-  return { id: p.id, scope: p.scope, name: p.name, photos };
+  return { id: p.id, scope: p.scope, name: p.name, photos, profile: cleanProfile(p.profile) };
 }
 
 function listPartners(sessionToken) {
@@ -884,8 +896,14 @@ function savePartner(sessionToken, req) {
     const sheet = getPartnersSheet();
     if (req.id) {
       const p = getEditablePartner(userId, req.id);
-      p.name = cleanPartnerName(req.name);
-      sheet.getRange(p.row, 4).setValue(p.name);
+      if (req.name !== undefined) {
+        p.name = cleanPartnerName(req.name);
+        sheet.getRange(p.row, 4).setValue(p.name);
+      }
+      if (req.profile !== undefined) {
+        p.profile = cleanProfile(req.profile);
+        sheet.getRange(p.row, 8).setValue(JSON.stringify(p.profile));
+      }
       sheet.getRange(p.row, 7).setValue(new Date());
       return { partner: partnerToClient(p) };
     }
@@ -894,8 +912,8 @@ function savePartner(sessionToken, req) {
     const all = readPartners();
     const count = all.filter(p => scope === "shared" ? p.scope === "shared" : (p.scope === "mine" && p.owner === userId)).length;
     if (count >= PARTNER_LIMIT) throw new Error(`話し相手は${PARTNER_LIMIT}人まで登録できます`);
-    const p = { id: Utilities.getUuid(), scope, owner: scope === "mine" ? userId : "", name: cleanPartnerName(req.name), photos: {} };
-    sheet.appendRow([p.id, p.scope, p.owner, p.name, "{}", Date.now(), new Date()]);
+    const p = { id: Utilities.getUuid(), scope, owner: scope === "mine" ? userId : "", name: cleanPartnerName(req.name), photos: {}, profile: cleanProfile(req.profile) };
+    sheet.appendRow([p.id, p.scope, p.owner, p.name, "{}", Date.now(), new Date(), JSON.stringify(p.profile)]);
     return { partner: partnerToClient(p) };
   });
 }
@@ -957,4 +975,173 @@ function clearPartnerPhotos(sessionToken, id) {
     getPartnersSheet().getRange(p.row, 5).setValue("{}");
     return { partner: partnerToClient(p) };
   });
+}
+
+/* ============================================================
+   話し相手の詳細設定（人柄・話し方・声）
+   ============================================================ */
+const PROFILE_CHOICES = {
+  gender: ["", "female", "male"],
+  age: ["", "10s", "20s", "30s", "40s", "50s", "60s", "70s"],
+  style: ["polite", "friendly", "casual"],
+  level: ["easy", "normal", "hard"]
+};
+
+/** 話し相手の詳細設定を安全な形に整える（未設定は既定値） */
+function cleanProfile(src) {
+  const p = src && typeof src === "object" ? src : {};
+  const pick = (k, def) => PROFILE_CHOICES[k].includes(p[k]) ? p[k] : def;
+  const text = (v, n) => String(v || "").replace(/[\r\n]+/g, " ").trim().slice(0, n);
+  const num = (v, min, max, def) => {
+    const x = Number(v);
+    return isFinite(x) ? Math.min(max, Math.max(min, Math.round(x * 100) / 100)) : def;
+  };
+  return {
+    gender: pick("gender", ""),
+    age: pick("age", ""),
+    personality: text(p.personality, 30),
+    style: pick("style", "friendly"),
+    level: pick("level", "easy"),
+    hometown: text(p.hometown, 40),
+    hobbies: text(p.hobbies, 80),
+    bio: text(p.bio, 300),
+    rate: num(p.rate, 0.5, 1.5, 1),
+    pitch: num(p.pitch, 0.5, 1.5, 1),
+    gvoice: (typeof TTS_VOICES !== "undefined" && TTS_VOICES.includes(p.gvoice)) ? p.gvoice : ""
+  };
+}
+
+function levelRule(P) {
+  if (P.level === "hard") return "Use natural, everyday expressions that a lower-intermediate learner would find slightly challenging, but keep it clear.";
+  if (P.level === "normal") return "Use common everyday vocabulary suitable for a learner who knows the basics.";
+  return "Use very simple beginner vocabulary and short, clear sentences.";
+}
+
+/** 話し相手のキャラクター設定をプロンプト用の文章にする */
+function personaBlock(P) {
+  const lines = [];
+  if (P.gender) lines.push(`- Gender: ${P.gender === "female" ? "woman (use feminine grammatical forms where the language requires it)" : "man (use masculine grammatical forms where the language requires it)"}`);
+  if (P.age) lines.push(`- Age: in your ${P.age === "10s" ? "late teens" : P.age}`);
+  if (P.personality) lines.push(`- Personality: ${P.personality}`);
+  if (P.hometown) lines.push(`- Hometown / where you live: ${P.hometown}`);
+  if (P.hobbies) lines.push(`- Hobbies / likes: ${P.hobbies}`);
+  if (P.bio) lines.push(`- Profile: ${P.bio}`);
+  const style = P.style === "polite" ? "Speak politely and respectfully."
+    : P.style === "casual" ? "Speak casually like a close friend; informal forms are fine (this overrides any politeness note above)."
+    : "Speak in a warm, friendly way.";
+  return `Your character (the settings may be written in Japanese; stay in character naturally, and only share these details when it fits the conversation or the learner asks):
+${lines.length ? lines.join("\n") : "- A friendly, ordinary conversation partner"}
+- Speaking style: ${style}
+`;
+}
+
+/* ============================================================
+   Gemini の声（TTS）
+   フロントで「Gemini の声」を選んだときだけ使う。失敗しても会話は返す（フロントが端末の声に切り替える）
+   ============================================================ */
+const TTS_VOICES = [
+  "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe",
+  "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+  "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
+];
+const DEFAULT_TTS_VOICE = { female: "Sulafat", male: "Achird", "": "Leda" };
+const EMOTION_STYLE = {
+  joy: "cheerful, warm and friendly",
+  neutral: "calm, warm and friendly",
+  sad: "gentle, soft and caring",
+  surprised: "surprised and lively"
+};
+
+function ttsModel() {
+  return PROPS.getProperty("TTS_MODEL") || "gemini-3.8-flash-tts";
+}
+
+/** 話し相手の設定から使う声を決める（明示の声 → 性別の既定） */
+function ttsVoiceFor(profile, voice) {
+  if (TTS_VOICES.includes(voice)) return voice;
+  const P = cleanProfile(profile);
+  if (TTS_VOICES.includes(P.gvoice)) return P.gvoice;
+  return DEFAULT_TTS_VOICE[P.gender] || "Leda";
+}
+
+/** 文章を音声（WAV・base64）にする */
+function synthesize(text, emotion, voice, lang, profile) {
+  const key = PROPS.getProperty("GEMINI_API_KEY");
+  if (!key) throw new Error("GEMINI_API_KEY が設定されていません");
+  const model = ttsModel();
+  const t = String(text || "")
+    .replace(/^\s*\[(neutral|joy|sad|surprised)\]\s*/i, "")
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F\u200D]/gu, "")
+    .trim().slice(0, 800);
+  if (!t) throw new Error("読み上げる文章がありません");
+
+  const P = cleanProfile(profile);
+  const L = getLang(lang);
+  let style = EMOTION_STYLE[emotion] || EMOTION_STYLE.neutral;
+  style += `, natural native ${L.en} pronunciation, clear enough for a language learner`;
+  if (P.rate < 0.9) style += ", speaking slowly";
+  else if (P.rate > 1.1) style += ", speaking a little quickly";
+  if (P.pitch < 0.9) style += ", slightly lower voice";
+  else if (P.pitch > 1.1) style += ", slightly higher voice";
+
+  const payload = {
+    contents: [{ role: "user", parts: [{ text: t, speech_metadata: { style: style } }] }],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      responseFormat: { audio: { mimeType: "AUDIO_WAV", sampleRate: 16000 } },
+      speechConfig: { voiceConfig: { voice: TTS_VOICES.includes(voice) ? voice : "Leda" } }
+    }
+  };
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent";
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: { "x-goog-api-key": key },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  let res, code;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    res = UrlFetchApp.fetch(url, options);
+    code = res.getResponseCode();
+    if (code !== 429 && code !== 503 && code !== 500) break;
+    Utilities.sleep(1000);
+  }
+  if (code !== 200) {
+    console.error("TTS " + code + ": " + res.getContentText().slice(0, 500));
+    throw new Error("音声を作れませんでした（" + code + "）");
+  }
+  const data = JSON.parse(res.getContentText());
+  const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+  const part = parts.filter(p => p.inlineData && p.inlineData.data)[0];
+  if (!part) throw new Error("音声データが返りませんでした");
+  return { data: part.inlineData.data, mimeType: part.inlineData.mimeType || "audio/wav", voice: voice };
+}
+
+/** 会話の返答に音声を付ける（req.tts が true のときだけ） */
+function withSpeech(result, req) {
+  if (!req.tts || !result || !result.reply) return result;
+  try {
+    result.audio = synthesize(result.reply, result.emotion, ttsVoiceFor(req.partnerProfile, req.ttsVoice), req.lang, req.partnerProfile);
+  } catch (e) {
+    result.ttsError = String((e && e.message) || e);
+  }
+  return result;
+}
+
+/** 単語の読み上げ・声の試し聞き・言い直しなど用 */
+function ttsAction(req) {
+  const text = String(req.text || "").trim();
+  if (!text) throw new Error("文章がありません");
+  if (text.length > 400) throw new Error("文章が長すぎます");
+  const emotion = EMOTIONS.includes(req.emotion) ? req.emotion : "neutral";
+  const audio = synthesize(text, emotion, ttsVoiceFor(req.partnerProfile, req.ttsVoice), req.lang, req.partnerProfile);
+  return { audio };
+}
+
+/** エディタから実行して Gemini の声の接続を確認する */
+function testTts() {
+  const a = synthesize("Hello! Nice to meet you.", "joy", "Leda", "en", {});
+  Logger.log(ttsModel() + " / " + a.mimeType + " / base64 " + a.data.length + " 文字");
 }

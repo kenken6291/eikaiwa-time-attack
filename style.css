@@ -544,3 +544,39 @@ main{max-width:640px; margin:0 auto; padding:22px 18px 100px;}
 .help-sec ul, .help-sec ol{padding-left:20px;}
 .help-steps li{margin-bottom:6px;}
 .help-tip{font-size:12.5px !important; color:var(--muted);}
+
+/* 話し相手の詳細設定 */
+.pm-selbar{
+  display:flex; align-items:center; gap:10px; margin:10px 0 4px; padding:10px 12px;
+  background:var(--paper); border-radius:12px; font-size:13px;
+}
+.pm-selbar-text{flex:1; min-width:0; line-height:1.6;}
+.pm-selbar-text span{font-size:11.5px; color:var(--muted);}
+.pm-tags{display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;}
+.pm-tags span{font-size:11px; color:var(--navy); background:#fff; border:1px solid var(--line); border-radius:999px; padding:1px 8px;}
+.pm-sel-edit{flex:none; margin:0; padding:9px 12px; font-size:13px; width:auto;}
+.pm-form .pm-row label{width:96px; font-size:12.5px;}
+.pm-row-top{align-items:flex-start;}
+.pm-row textarea{
+  flex:1; min-width:0; font-family:var(--font-body); font-size:14px; padding:10px 12px; resize:vertical;
+  border:1.5px solid var(--line); border-radius:10px; background:var(--paper);
+}
+.pm-row input[type="range"]{flex:1; min-width:0; accent-color:var(--coral);}
+.pm-val{flex:none; width:96px; white-space:nowrap; font-family:var(--font-mono); font-size:11.5px; color:var(--muted); text-align:right;}
+.pm-suggest{display:flex; flex-wrap:wrap; gap:5px; margin:-4px 0 10px 106px;}
+.pm-suggest .chip{font-size:11.5px; padding:4px 9px;}
+.pm-save{width:100%; margin:4px 0 6px;}
+@media (max-width:420px){
+  .pm-form .pm-row{flex-wrap:wrap; gap:4px;}
+  .pm-form .pm-row label{width:100%;}
+  .pm-suggest{margin-left:0;}
+}
+
+/* お知らせ（Geminiの声が使えなかったとき等） */
+.toast{
+  position:fixed; left:50%; bottom:calc(84px + env(safe-area-inset-bottom, 0px)); transform:translate(-50%, 20px);
+  max-width:min(92vw, 420px); background:var(--navy); color:#fff; font-size:13px; line-height:1.5;
+  padding:10px 16px; border-radius:12px; box-shadow:0 8px 22px rgba(20,25,50,0.25);
+  opacity:0; pointer-events:none; transition:opacity 0.25s, transform 0.25s; z-index:60;
+}
+.toast.show{opacity:1; transform:translate(-50%, 0);}

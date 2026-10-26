@@ -79,6 +79,22 @@ const Partner = (() => {
   const CUR_KEY = "speakin3_partner_current";
   const VOICE_KEY = "speakin3_partner_voices";
   const SCOPE_LABEL = { mine: "マイ話し相手", shared: "みんなの話し相手", default: "標準" };
+
+  /* ---------- 詳細設定（人柄・話し方・声）---------- */
+  const PROFILE_DEFAULT = { gender: "", age: "", personality: "", style: "friendly", level: "easy",
+                            hometown: "", hobbies: "", bio: "", rate: 1, pitch: 1, gvoice: "" };
+  /** Gemini の声（30種）。女性的／男性的は目安 */
+  const GEMINI_VOICES_F = ["Zephyr", "Kore", "Leda", "Aoede", "Callirrhoe", "Autonoe", "Despina", "Erinome",
+                           "Laomedeia", "Achernar", "Gacrux", "Pulcherrima", "Vindemiatrix", "Sulafat"];
+  const GEMINI_VOICES_M = ["Puck", "Charon", "Fenrir", "Orus", "Enceladus", "Iapetus", "Umbriel", "Algieba",
+                           "Algenib", "Rasalgethi", "Alnilam", "Schedar", "Achird", "Zubenelgenubi", "Sadachbia", "Sadaltager"];
+  const GENDER_OPTS = [["", "指定しない"], ["female", "女性"], ["male", "男性"]];
+  const AGE_OPTS = [["", "指定しない"], ["10s", "10代"], ["20s", "20代"], ["30s", "30代"], ["40s", "40代"],
+                    ["50s", "50代"], ["60s", "60代"], ["70s", "70代"]];
+  const STYLE_OPTS = [["polite", "ていねい"], ["friendly", "フレンドリー"], ["casual", "くだけた（友だち口調）"]];
+  const LEVEL_OPTS = [["easy", "やさしい（初級）"], ["normal", "ふつう"], ["hard", "少し難しい"]];
+  const PERSONALITY_SUGGEST = ["やさしい", "明るく元気", "落ち着いている", "ユーモアがある", "まじめ", "おっとり", "聞き上手", "情熱的"];
+  function profileOf(p){ return Object.assign({}, PROFILE_DEFAULT, (p && p.profile) || {}); }
   const PALETTE = {
     en: { bg: "#DBE7FB", hair: "#5A3B2A", skin: "#F3D2BB", shirt: "#3F6FD8" },
     es: { bg: "#FDE3D6", hair: "#2B1D16", skin: "#E8B993", shirt: "#E0543F" },
@@ -152,18 +168,18 @@ const Partner = (() => {
     return (want && list.find(v => v.voiceURI === want)) || list[0] || null;
   }
   const pickVoice = lang => pickVoiceFor(currentId, lang);
+  /** 選択中の話し相手の話す速さ・声の高さ */
+  function voiceParams(){
+    const pr = profileOf(current());
+    return { rate: Number(pr.rate) || 1, pitch: Number(pr.pitch) || 1 };
+  }
+  /** 会話APIへ渡す人柄・話し方（標準の話し相手は既定値） */
+  function profile(){ return profileOf(current()); }
 
-  function sayWith(pid, lang, text, avatar){
-    if (!synth) return;
-    synth.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = getLang(lang).speech;
-    const v = pickVoiceFor(pid, lang);
-    if (v) u.voice = v;
-    if (avatar){ avatar.setEmotion("joy"); avatar.startTalking(); }
-    const end = () => avatar && avatar.stopTalking();
-    u.onend = end; u.onerror = end;
-    synth.speak(u);
+  /** 試し聞き用：アプリ共通の speak()（端末の声／Geminiの声）で話させる */
+  function sayWith(pid, lang, text, avatar, params){
+    if (avatar) avatar.setEmotion("joy");
+    speak(text, { lang, emotion: "joy", profile: params || profileOf(find(pid)), voicePid: pid, avatar: avatar || null });
   }
 
   /* ---------- アバター ---------- */
@@ -236,14 +252,19 @@ const Partner = (() => {
       this.emo = e;
       this.el.dataset.emo = e;
     }
-    startTalking(){
-      if (this._mouthT) return;
+    /** manual=true のときは自動で口を動かさず、setMouth() で音量に合わせて動かす */
+    startTalking(manual){
       this.el.classList.add("talking");
+      if (manual){ clearTimeout(this._mouthT); this._mouthT = null; return; }
+      if (this._mouthT) return;
       const tick = () => {
         this.el.classList.toggle("mouth-open", Math.random() < 0.6);
         this._mouthT = setTimeout(tick, 90 + Math.random() * 130);
       };
       tick();
+    }
+    setMouth(open){
+      this.el.classList.toggle("mouth-open", !!open && this.el.classList.contains("talking"));
     }
     stopTalking(){
       clearTimeout(this._mouthT);
@@ -286,7 +307,8 @@ const Partner = (() => {
     document.querySelectorAll("[data-partner-scope]").forEach(el => el.textContent = SCOPE_LABEL[scopeOf(currentId)]);
   }
   const setEmotionAll = e => avatars.forEach(a => a.setEmotion(e));
-  const startTalkingAll = () => avatars.forEach(a => { if (!a.el.dataset.fixed) a.startTalking(); });
+  const startTalkingAll = manual => avatars.forEach(a => { if (!a.el.dataset.fixed) a.startTalking(manual); });
+  const setMouthAll = open => avatars.forEach(a => { if (!a.el.dataset.fixed) a.setMouth(open); });
   const stopTalkingAll = () => avatars.forEach(a => a.stopTalking());
 
   /* ---------- 返答から表情タグを取り出す（GASが先頭に [joy] などを付けて返す）---------- */
@@ -402,6 +424,7 @@ const Partner = (() => {
         ${list.map(p => tile(p, p.id)).join("")}
         ${editable && list.length < LIMIT ? `<button type="button" class="pm-tile pm-add" id="pm-add"><span>＋</span><div class="pm-tile-name">新しく追加</div></button>` : ""}
       </div>
+      ${selectedBarHTML()}
       ${!data.loaded ? `<p class="pm-note warn">サーバーから話し相手を読み込めませんでした。時間をおいて開き直してください。</p>` : ""}
       ${tab === "shared" && !list.length ? `<p class="pm-note">まだ登録されていません。</p>` : ""}
       <p class="auth-msg" id="pm-msg"></p>
@@ -417,6 +440,8 @@ const Partner = (() => {
       msg(`${p ? p.name : "標準"} に切り替えました`, true);
     }));
     r.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => openEditor(b.dataset.edit)));
+    const selEdit = document.getElementById("pm-sel-edit");
+    if (selEdit) selEdit.addEventListener("click", () => openEditor(currentId));
     const add = document.getElementById("pm-add");
     if (add) add.addEventListener("click", async () => {
       add.disabled = true;
@@ -428,6 +453,26 @@ const Partner = (() => {
       }catch(err){ msg(err.message); add.disabled = false; }
     });
     document.getElementById("pm-close").addEventListener("click", closeModal);
+  }
+
+  /** 一覧の下に「選択中の話し相手」と詳細設定ボタンを出す */
+  function selectedBarHTML(){
+    const p = current();
+    if (!p){
+      return `<div class="pm-selbar"><div class="pm-selbar-text">選択中：<b>標準（${escapeHtml(getLang(currentLang).partner)}）</b><br>
+        <span>標準の話し相手は変更できません。「＋新しく追加」で自分の話し相手を作ると、写真・人柄・話し方・声を細かく設定できます。</span></div></div>`;
+    }
+    const pr = profileOf(p);
+    const label = (list, v) => { const o = list.find(x => x[0] === v && x[0]); return o ? o[1] : ""; };
+    const tags = [label(GENDER_OPTS, pr.gender), label(AGE_OPTS, pr.age), pr.personality,
+                  label(STYLE_OPTS, pr.style), label(LEVEL_OPTS, pr.level)].filter(Boolean);
+    return `<div class="pm-selbar">
+      <div class="pm-selbar-text">選択中：<b>${escapeHtml(p.name)}</b>
+        <div class="pm-tags">${tags.map(t => `<span>${escapeHtml(t)}</span>`).join("")}</div>
+        ${canEdit(p) ? "" : `<span>この話し相手は管理者だけが変更できます。</span>`}
+      </div>
+      ${canEdit(p) ? `<button type="button" class="btn-secondary pm-sel-edit" id="pm-sel-edit">⚙ 詳細設定</button>` : ""}
+    </div>`;
   }
 
   function openEditor(id){
@@ -451,6 +496,8 @@ const Partner = (() => {
     const voices = voicesFor(currentLang);
     const curVoice = voicePref(p.id, currentLang);
     const photos = p.photos || {};
+    const pr = profileOf(p);
+    const opts = (list, val) => list.map(([v, t]) => `<option value="${v}"${String(val) === v ? " selected" : ""}>${escapeHtml(t)}</option>`).join("");
 
     r.innerHTML = `
       <button type="button" class="pm-back" id="pm-back">← 一覧へ戻る</button>
@@ -463,19 +510,49 @@ const Partner = (() => {
           <button type="button" class="btn-primary pm-use" id="pm-use">${currentId === p.id ? "✓ 使用中" : "この話し相手を使う"}</button>
         </div>
       </div>
-      <div class="pm-row">
-        <label for="pm-name">名前</label>
-        <input type="text" id="pm-name" maxlength="16" value="${escapeHtml(p.name)}">
-      </div>
-      <div class="pm-row">
-        <label for="pm-voice">声</label>
+      <h4 class="pm-sub">詳細設定（人柄・話し方・声）</h4>
+      <p class="pm-note">ここで決めた人柄や話し方で、AIが話し相手になりきって会話します。</p>
+      <div class="pm-form">
+        <div class="pm-row"><label for="pm-name">名前</label>
+          <input type="text" id="pm-name" maxlength="16" value="${escapeHtml(p.name)}"></div>
+        <div class="pm-row"><label for="pm-gender">性別</label>
+          <select id="pm-gender">${opts(GENDER_OPTS, pr.gender)}</select></div>
+        <div class="pm-row"><label for="pm-age">年代</label>
+          <select id="pm-age">${opts(AGE_OPTS, pr.age)}</select></div>
+        <div class="pm-row"><label for="pm-personality">性格</label>
+          <input type="text" id="pm-personality" maxlength="30" value="${escapeHtml(pr.personality)}" placeholder="例：明るく元気"></div>
+        <div class="pm-suggest">${PERSONALITY_SUGGEST.map(t => `<button type="button" class="chip" data-suggest="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join("")}</div>
+        <div class="pm-row"><label for="pm-style">話し方</label>
+          <select id="pm-style">${opts(STYLE_OPTS, pr.style)}</select></div>
+        <div class="pm-row"><label for="pm-level">会話の難しさ</label>
+          <select id="pm-level">${opts(LEVEL_OPTS, pr.level)}</select></div>
+        <div class="pm-row"><label for="pm-hometown">出身・住まい</label>
+          <input type="text" id="pm-hometown" maxlength="40" value="${escapeHtml(pr.hometown)}" placeholder="例：パリ在住、リヨン出身"></div>
+        <div class="pm-row"><label for="pm-hobbies">趣味・好きな物</label>
+          <input type="text" id="pm-hobbies" maxlength="80" value="${escapeHtml(pr.hobbies)}" placeholder="例：映画、料理、サイクリング"></div>
+        <div class="pm-row pm-row-top"><label for="pm-bio">プロフィール</label>
+          <textarea id="pm-bio" maxlength="300" rows="3" placeholder="例：駅前のカフェで働く28歳。日本のアニメが好きで、日本旅行を計画中。">${escapeHtml(pr.bio)}</textarea></div>
+        <div class="pm-row"><label for="pm-rate">話す速さ</label>
+          <input type="range" id="pm-rate" min="0.6" max="1.4" step="0.05" value="${pr.rate}"><span class="pm-val" id="pm-rate-val"></span></div>
+        <div class="pm-row"><label for="pm-pitch">声の高さ</label>
+          <input type="range" id="pm-pitch" min="0.5" max="1.5" step="0.05" value="${pr.pitch}"><span class="pm-val" id="pm-pitch-val"></span></div>
+        <div class="pm-row"><label for="pm-voice">声</label>
         <select id="pm-voice">
           <option value="">自動（${escapeHtml(L.label)}）</option>
           ${voices.map(v => `<option value="${escapeHtml(v.voiceURI)}"${v.voiceURI === curVoice ? " selected" : ""}>${escapeHtml(v.name)}（${escapeHtml(v.lang)}）</option>`).join("")}
         </select>
       </div>
-      <p class="pm-note">声は言語ごと・端末ごとに選べます（いまの練習言語：${escapeHtml(L.label)}）。</p>
-      ${voices.length ? "" : `<p class="pm-note warn">この端末には${escapeHtml(L.label)}の声が見つかりません。端末の音声設定で${escapeHtml(L.label)}の読み上げ音声を追加してください。</p>`}
+      <div class="pm-row"><label for="pm-gvoice">Geminiの声</label>
+        <select id="pm-gvoice">
+          <option value="">自動（性別に合わせる）</option>
+          <optgroup label="女性的な声">${GEMINI_VOICES_F.map(v => `<option value="${v}"${pr.gvoice === v ? " selected" : ""}>${v}</option>`).join("")}</optgroup>
+          <optgroup label="男性的な声">${GEMINI_VOICES_M.map(v => `<option value="${v}"${pr.gvoice === v ? " selected" : ""}>${v}</option>`).join("")}</optgroup>
+        </select>
+      </div>
+      </div>
+      <p class="pm-note">いまの読み上げ：<b>${useGemini() ? "Geminiの声" : "端末の声"}</b>（テーマ画面の「読み上げの声」で切り替え）。「声」は端末の声を使うときの設定で、言語ごと・端末ごとに選べます（いまの練習言語：${escapeHtml(L.label)}）。「Geminiの声」・話す速さ・声の高さは、どの端末でも同じ設定が使われます。</p>
+      <button type="button" class="btn-primary pm-save" id="pm-save">詳細設定を保存</button>
+      ${voices.length || useGemini() ? "" : `<p class="pm-note warn">この端末には${escapeHtml(L.label)}の声が見つかりません。端末の音声設定で${escapeHtml(L.label)}の読み上げ音声を追加してください。</p>`}
 
       <h4 class="pm-sub">写真（表情ごとに 顔・瞬き・しゃべり）</h4>
       <p class="pm-note">「顔」は目を開けて口を閉じた写真、「瞬き」は目を閉じた写真、「しゃべり」は口を開けた写真です。同じ構図で撮るときれいに切り替わります（正方形に切り抜かれます）。普通の「顔」だけでも動きます。</p>
@@ -518,19 +595,49 @@ const Partner = (() => {
     document.getElementById("pm-done").addEventListener("click", renderPicker);
     document.getElementById("pm-use").addEventListener("click", () => { select(p.id); renderEditor(); msg(`${p.name} に切り替えました`, true); });
     r.querySelectorAll("[data-pm-emo]").forEach(b => b.addEventListener("click", () => modalAvatar.setEmotion(b.dataset.pmEmo)));
-    document.getElementById("pm-say").addEventListener("click", () => sayWith(p.id, currentLang, getLang(currentLang).hello, modalAvatar));
-
-    document.getElementById("pm-name").addEventListener("change", async e => {
-      const nm = e.target.value.trim();
-      if (!nm){ e.target.value = p.name; return; }
-      msg("保存中…");
-      try{
-        const res = await callBackend("savePartner", { id: p.id, name: nm }, 20000);
-        replacePartner(Object.assign({}, p, { name: res.partner.name }));
-        refreshLabels();
-        msg("名前を保存しました", true);
-      }catch(err){ msg(err.message); }
+    const formProfile = () => ({
+      gender: document.getElementById("pm-gender").value,
+      age: document.getElementById("pm-age").value,
+      personality: document.getElementById("pm-personality").value.trim(),
+      style: document.getElementById("pm-style").value,
+      level: document.getElementById("pm-level").value,
+      hometown: document.getElementById("pm-hometown").value.trim(),
+      hobbies: document.getElementById("pm-hobbies").value.trim(),
+      bio: document.getElementById("pm-bio").value.trim(),
+      rate: Number(document.getElementById("pm-rate").value),
+      pitch: Number(document.getElementById("pm-pitch").value),
+      gvoice: document.getElementById("pm-gvoice").value
     });
+    const showVals = () => {
+      const rv = Number(document.getElementById("pm-rate").value);
+      const pv = Number(document.getElementById("pm-pitch").value);
+      document.getElementById("pm-rate-val").textContent = (rv < 0.9 ? "ゆっくり " : rv > 1.1 ? "速い " : "ふつう ") + rv.toFixed(2);
+      document.getElementById("pm-pitch-val").textContent = (pv < 0.9 ? "低め " : pv > 1.1 ? "高め " : "ふつう ") + pv.toFixed(2);
+    };
+    showVals();
+    ["pm-rate", "pm-pitch"].forEach(id => document.getElementById(id).addEventListener("input", showVals));
+    r.querySelectorAll("[data-suggest]").forEach(b => b.addEventListener("click", () => {
+      const el = document.getElementById("pm-personality");
+      const cur = el.value.trim();
+      if (!cur.split(/[、,]/).map(x => x.trim()).includes(b.dataset.suggest)){
+        el.value = ((cur ? cur + "、" : "") + b.dataset.suggest).slice(0, 30);
+      }
+    }));
+    document.getElementById("pm-say").addEventListener("click", () => sayWith(p.id, currentLang, getLang(currentLang).hello, modalAvatar, formProfile()));
+    document.getElementById("pm-save").addEventListener("click", async () => {
+      const nm = document.getElementById("pm-name").value.trim();
+      if (!nm){ msg("名前を入力してください"); return; }
+      const btn = document.getElementById("pm-save");
+      btn.disabled = true; msg("保存中…");
+      try{
+        const res = await callBackend("savePartner", { id: p.id, name: nm, profile: formProfile() }, 20000);
+        replacePartner(Object.assign({}, p, { name: res.partner.name, profile: res.partner.profile }));
+        refreshLabels();
+        msg("詳細設定を保存しました", true);
+      }catch(err){ msg(err.message); }
+      finally{ btn.disabled = false; }
+    });
+
     document.getElementById("pm-voice").addEventListener("change", e => setVoicePref(p.id, currentLang, e.target.value));
 
     let pendingKey = null;
@@ -600,7 +707,7 @@ const Partner = (() => {
   function onModalClosed(){
     destroyModalAvatar();
     editId = null;
-    synth && synth.cancel();
+    if (typeof stopSpeech === "function") stopSpeech(); else if (synth) synth.cancel();
     load(currentLang);
   }
 
@@ -612,8 +719,8 @@ const Partner = (() => {
   }
 
   return {
-    Avatar, load, refresh, reset, select, name, pickVoice, parseReply, refreshLabels,
-    setEmotionAll, startTalkingAll, stopTalkingAll,
+    Avatar, load, refresh, reset, select, name, pickVoice, voiceParams, profile, parseReply, refreshLabels,
+    setEmotionAll, startTalkingAll, setMouthAll, stopTalkingAll, pickVoiceFor,
     openPicker, openSettings: openPicker, onModalClosed,
     get lang(){ return currentLang; }
   };

@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=2.3.0">
+<link rel="stylesheet" href="style.css?v=2.5.0">
 </head>
 <body>
 
@@ -127,6 +127,14 @@
         </select>
       </div>
       <p class="lang-note" id="lang-note" hidden></p>
+
+      <div class="settings-row">
+        <label for="tts-engine-select">読み上げの声</label>
+        <select id="tts-engine-select">
+          <option value="device">端末の声（すぐ話す）</option>
+          <option value="gemini">Geminiの声（自然・数秒待つ）</option>
+        </select>
+      </div>
 
       <div class="settings-row">
         <label for="wait-time-select">応答までの待ち時間</label>
@@ -304,8 +312,8 @@
   <div class="modal-card" id="modal-card"></div>
 </div>
 
-<script src="config.js?v=2.3.0"></script>
-<script src="partner.js?v=2.3.0"></script>
-<script src="script.js?v=2.3.0"></script>
+<script src="config.js?v=2.5.0"></script>
+<script src="partner.js?v=2.5.0"></script>
+<script src="script.js?v=2.5.0"></script>
 </body>
 </html>

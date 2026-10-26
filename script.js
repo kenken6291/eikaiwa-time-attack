@@ -4,9 +4,9 @@
    GASウェブアプリのURLは config.js で設定してください
    ============================================================ */
 /** フロントエンドのバージョン — ファイルを更新したらここも更新する */
-const APP_VERSION = "2.3.0";
+const APP_VERSION = "2.5.0";
 /** この画面が必要とするサーバー（GAS）の最低バージョン。これより古いときだけ警告する */
-const REQUIRED_SERVER_VERSION = "2.2.0";
+const REQUIRED_SERVER_VERSION = "2.5.0";
 const APP_UPDATED = "2026-10-26";
 
 const GAS_URL = String(window.GAS_URL || "");
@@ -390,13 +390,15 @@ function helpHTML(){
     </details>
 
     <details class="help-sec">
-      <summary>④ 話し相手を作る（写真の登録）</summary>
+      <summary>④ 話し相手を作る（写真・詳細設定）</summary>
       <ol class="help-steps">
         <li>「マイ話し相手」で「＋新しく追加」を押します。</li>
         <li>名前を入力します（会話の中でもこの名前を名乗ります）。</li>
         <li>写真の枠（＋）を押して写真を選びます。表情は「普通・笑顔・困り顔・驚き」、それぞれに「顔・瞬き・しゃべり」の3枚、合計12枚まで登録できます。</li>
-        <li>「この話し相手を使う」を押せば完了です。「試しに話す」で動きを確認できます。</li>
+        <li>「詳細設定」で、性別・年代・性格・話し方・会話の難しさ・出身・趣味・プロフィール・話す速さ・声の高さ・声を決めて「詳細設定を保存」を押します。</li>
+        <li>「この話し相手を使う」を押せば完了です。「試しに話す」で動きと声を確認できます。</li>
       </ol>
+      <p class="help-tip">あとから変更するときは、「話し相手を選ぶ」画面で話し相手の ✎、または下の「⚙ 詳細設定」を押します。</p>
       <ul>
         <li><b>顔</b>＝目を開けて口を閉じた写真、<b>瞬き</b>＝目を閉じた写真、<b>しゃべり</b>＝口を開けた写真です。</li>
         <li>最低限「普通」の「顔」が1枚あれば動きます。足りない表情は「普通」の写真で代用します。</li>
@@ -407,7 +409,13 @@ function helpHTML(){
     </details>
 
     <details class="help-sec">
-      <summary>⑤ 声の設定</summary>
+      <summary>⑤ 声の設定（端末の声／Geminiの声）</summary>
+      <p>テーマ画面の「読み上げの声」で選べます。</p>
+      <ul>
+        <li><b>端末の声</b>：スマホやパソコンに入っている声です。すぐに読み上げますが、言語によっては機械的な声になります。</li>
+        <li><b>Geminiの声</b>：AIが作る、人に近い自然な声です。表情（笑顔・困り顔など）に合わせて話し方も変わります。作るのに数秒かかり、うまく作れないときは自動で端末の声に切り替わります。</li>
+      </ul>
+      <p>Geminiの声は、話し相手の詳細設定の「Geminiの声」で30種類から選べます（「自動」は性別に合わせます）。話す速さ・声の高さの設定も、だいたいの雰囲気として反映されます。</p>
       <p>話し相手の編集画面の「声」で、いま練習している言語の声を選べます（話し相手ごと・言語ごと・端末ごとに覚えます）。</p>
       <p>「声が見つかりません」と出たときは、端末にその言語の読み上げ音声がありません。</p>
       <ul>
@@ -429,6 +437,7 @@ function helpHTML(){
         <li><b>自分の声ではなく話し相手の声を拾ってしまう</b>：イヤホンを使うと安定します。</li>
         <li><b>写真が表示されない</b>：通信が遅いと時間がかかります。少し待つか、話し相手を選び直してください。</li>
         <li><b>「タイムアウト」「混雑」と出る</b>：AIが混み合っています。少し待ってからもう一度お試しください。</li>
+        <li><b>Geminiの声が鳴らない</b>：一度画面をタップしてから始めてください（ブラウザが自動再生を止めることがあります）。マナーモード・音量も確認してください。</li>
         <li><b>画面下のバージョン表示が赤い</b>：サーバー側が古い可能性があります。管理者にお知らせください。</li>
       </ul>
     </details>
@@ -551,7 +560,7 @@ function stopActiveStepProcesses(){
   if (recognizer){ try{ recognizer.stop(); }catch(e){} }
   if (themeRecognizer){ try{ themeRecognizer.stop(); }catch(e){} }
   if (normalRecognizer){ try{ normalRecognizer.stop(); }catch(e){} }
-  synth && synth.cancel();
+  stopSpeech();
   Partner.stopTalkingAll();
 }
 
@@ -613,7 +622,7 @@ document.getElementById("nav-restart").addEventListener("click", () => {
 function goBackQuestion(){
   clearInterval(countdownTimer);
   if (recognizer){ try{ recognizer.stop(); }catch(e){} }
-  synth && synth.cancel();
+  stopSpeech();
 
   let lastAiIdx = -1;
   for (let i = state.talkHistory.length - 1; i >= 0; i--){
@@ -644,7 +653,7 @@ function skipQuestion(){
 function restartConversationOnly(){
   clearInterval(countdownTimer);
   if (recognizer){ try{ recognizer.stop(); }catch(e){} }
-  synth && synth.cancel();
+  stopSpeech();
   state.talkHistory = [];
   document.getElementById("talk-log").innerHTML = "";
   startConversation();
@@ -1003,7 +1012,7 @@ function updateNormalTimer(){
     normalTimeUp = true;
     clearInterval(normalTimerInterval);
     if (normalRecognizer){ try{ normalRecognizer.stop(); }catch(e){} }
-    synth && synth.cancel();
+    stopSpeech();
     endNormalConversation();
   }
 }
@@ -1012,7 +1021,8 @@ async function startNormalConversation(){
   document.getElementById("normal-ai-line").textContent = "準備中…";
   try{
     const data = await callBackendWithRetry("normalChatReply", chatPayload([]), 0);
-    await pushNormalAiLine(data.reply);
+    if (data.ttsError) noteTtsFallback(data.ttsError);
+    await pushNormalAiLine(data.reply, data.audio);
   }catch(err){
     await pushNormalAiLine(L().normalStart(state.theme));
   }
@@ -1027,13 +1037,13 @@ function addNormalLogRow(role, text){
   log.scrollTop = log.scrollHeight;
 }
 
-async function pushNormalAiLine(raw){
+async function pushNormalAiLine(raw, audio){
   const { text, emotion } = Partner.parseReply(raw);
   Partner.setEmotionAll(emotion);
   document.getElementById("normal-ai-line").textContent = text;
   normalHistory.push({ role: "ai", text });
   addNormalLogRow("ai", text);
-  await speak(text);
+  await speak(text, { audio, emotion });
   if (normalTimeUp){ endNormalConversation(); return; }
   await settleAfterSpeak(); // 読み上げの残響がマイクに入らないよう少し待つ
   beginNormalListen();
@@ -1044,7 +1054,7 @@ function beginNormalListen(){
     document.getElementById("normal-you-line").textContent = "この端末は音声認識に対応していません。";
     return;
   }
-  synth && synth.cancel(); // Android等でTTSが完全に止まっていない状態を防ぐ保険
+  stopSpeech(); // Android等でTTSが完全に止まっていない状態を防ぐ保険
   const indicator = document.getElementById("normal-mic-indicator");
 
   let handled = false;
@@ -1128,7 +1138,8 @@ async function continueNormalConversation(){
   if (normalTimeUp){ endNormalConversation(); return; }
   try{
     const data = await callBackendWithRetry("normalChatReply", chatPayload(normalHistory), 1);
-    await pushNormalAiLine(data.reply);
+    if (data.ttsError) noteTtsFallback(data.ttsError);
+    await pushNormalAiLine(data.reply, data.audio);
   }catch(err){
     await pushNormalAiLine(L().again);
   }
@@ -1142,7 +1153,7 @@ function endNormalConversation(){
   normalActive = false;
   clearInterval(normalTimerInterval);
   if (normalRecognizer){ try{ normalRecognizer.stop(); }catch(e){} }
-  synth && synth.cancel();
+  stopSpeech();
   document.getElementById("normal-mic-indicator").classList.remove("listening");
   Partner.stopTalkingAll();
   Partner.setEmotionAll("joy");
@@ -1175,35 +1186,216 @@ let countdownTimer = null;
 let countdownStart = 0;
 const RING_CIRC = 389.6;
 
-/** 選んだ言語の声で読み上げ、そのあいだ話し相手の口を動かす */
-function speak(text, opts = {}){
+/* ============================================================
+   読み上げ — 端末の声 ／ Gemini の声（設定で切り替え）
+   ============================================================ */
+const TTS_ENGINE_KEY = "speakin3_tts_engine";
+let ttsEngine = (() => { try{ return localStorage.getItem(TTS_ENGINE_KEY) || "device"; }catch(e){ return "device"; } })();
+function useGemini(){ return ttsEngine === "gemini"; }
+
+const ttsSelect = document.getElementById("tts-engine-select");
+ttsSelect.value = ttsEngine;
+ttsSelect.addEventListener("change", e => {
+  ttsEngine = e.target.value === "gemini" ? "gemini" : "device";
+  try{ localStorage.setItem(TTS_ENGINE_KEY, ttsEngine); }catch(err){}
+  if (useGemini()) ensureAudioCtx(); // ここでの操作を使って音声の再生を許可しておく
+});
+
+let speechToken = 0;      // 読み上げを止めたら番号を進め、遅れて届いた音声は再生しない
+let audioCtx = null;
+let curSource = null;
+let lipRAF = 0;
+const audioCache = new Map(); // 同じ文章をもう一度読むとき（前へ戻る等）はサーバーを呼ばない
+
+function ensureAudioCtx(){
+  try{
+    if (!audioCtx){
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      audioCtx = new AC();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+    return audioCtx;
+  }catch(e){ return null; }
+}
+// ブラウザの自動再生制限のため、最初の操作で音声の準備をしておく
+["pointerdown", "keydown", "touchstart"].forEach(ev =>
+  document.addEventListener(ev, ensureAudioCtx, { capture: true, passive: true }));
+
+function stopSpeech(){
+  speechToken++;
+  if (synth) synth.cancel();
+  if (curSource){
+    const s = curSource;
+    curSource = null;
+    try{ s.stop(); }catch(e){}
+    if (s._finish) s._finish();
+  }
+  cancelAnimationFrame(lipRAF);
+  Partner.stopTalkingAll();
+}
+
+let lastTtsNotice = 0;
+function noteTtsFallback(reason){
+  const now = Date.now();
+  if (now - lastTtsNotice < 60000) return;
+  lastTtsNotice = now;
+  showToast("Geminiの声を作れなかったため、端末の声で読み上げます" + (reason ? `（${reason}）` : ""));
+}
+function showToast(text){
+  let el = document.getElementById("toast");
+  if (!el){
+    el = document.createElement("div");
+    el.id = "toast";
+    el.className = "toast";
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.classList.add("show");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove("show"), 4000);
+}
+
+function ttsCacheKey(text, lang, profile){
+  return [lang, profile.gvoice || "", profile.gender || "", profile.rate, profile.pitch, text].join("|");
+}
+function cacheAudio(key, audio){
+  audioCache.set(key, audio);
+  if (audioCache.size > 30) audioCache.delete(audioCache.keys().next().value);
+}
+
+function b64ToArrayBuffer(b64){
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u.buffer;
+}
+
+/** 口パクの対象（指定がなければ画面の話し相手すべて） */
+function lipTargets(avatar){
+  return {
+    start: () => avatar ? avatar.startTalking(true) : Partner.startTalkingAll(true),
+    mouth: open => avatar ? avatar.setMouth(open) : Partner.setMouthAll(open),
+    stop: () => avatar ? avatar.stopTalking() : Partner.stopTalkingAll()
+  };
+}
+
+/** Gemini の音声（WAV base64）を再生し、音量に合わせて口を動かす。再生できなければ false */
+async function playGeminiAudio(audio, token, avatar){
+  const ctx = ensureAudioCtx();
+  if (!ctx || !audio || !audio.data) return false;
+  if (ctx.state !== "running"){
+    try{ await Promise.race([ctx.resume(), new Promise(r => setTimeout(r, 1500))]); }catch(e){}
+    if (ctx.state !== "running") return false;
+  }
+  let buf;
+  try{ buf = await ctx.decodeAudioData(b64ToArrayBuffer(audio.data)); }catch(e){ return false; }
+  if (token !== speechToken) return true; // 途中で止められた
+
+  const lip = lipTargets(avatar);
   return new Promise(resolve => {
-    if (!synth){ resolve(); return; }
-    synth.cancel();
-    const lang = opts.lang || state.lang;
-    const clean = String(text || "").replace(/[*_#`]/g, "").trim();
-    if (!clean){ resolve(); return; }
-    const utter = new SpeechSynthesisUtterance(clean);
-    utter.lang = getLang(lang).speech;
-    const voice = Partner.pickVoice(lang);
-    if (voice) utter.voice = voice;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const an = ctx.createAnalyser();
+    an.fftSize = 1024;
+    src.connect(an);
+    an.connect(ctx.destination);
+    curSource = src;
+
+    const data = new Uint8Array(an.fftSize);
+    let smooth = 0;
+    lip.start();
+    const tick = () => {
+      an.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++){ const x = (data[i] - 128) / 128; sum += x * x; }
+      const level = Math.min(1, Math.sqrt(sum / data.length) * 7);
+      smooth = smooth * 0.45 + level * 0.55;
+      lip.mouth(smooth > 0.18);
+      lipRAF = requestAnimationFrame(tick);
+    };
+    tick();
 
     let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      cancelAnimationFrame(lipRAF);
+      clearTimeout(guard);
+      lip.stop();
+      if (curSource === src) curSource = null;
+      resolve(true);
+    };
+    const guard = setTimeout(finish, buf.duration * 1000 + 2000);
+    src.onended = finish;
+    src._finish = finish;
+    src.start();
+  });
+}
+
+/** 端末の声で読み上げる */
+function speakWithDevice(clean, lang, profile, voicePid, avatar, token){
+  return new Promise(resolve => {
+    if (!synth || token !== speechToken){ resolve(); return; }
+    const utter = new SpeechSynthesisUtterance(clean);
+    utter.lang = getLang(lang).speech;
+    const voice = voicePid ? Partner.pickVoiceFor(voicePid, lang) : Partner.pickVoice(lang);
+    if (voice) utter.voice = voice;
+    const rate = Number(profile.rate) || 1;
+    utter.rate = rate;
+    utter.pitch = Number(profile.pitch) || 1;
+
+    const lip = lipTargets(avatar);
+    let done = false;
     const perChar = /^(zh|ko)$/.test(lang) ? 380 : 160;
-    const safety = setTimeout(() => finish(), 5000 + clean.length * perChar); // onendが来ない端末への保険
+    const safety = setTimeout(() => finish(), 5000 + clean.length * perChar / Math.max(0.5, rate)); // onendが来ない端末への保険
     function finish(){
       if (done) return;
       done = true;
       clearTimeout(safety);
-      Partner.stopTalkingAll();
+      lip.stop();
       resolve();
     }
-    utter.onstart = () => Partner.startTalkingAll();
+    utter.onstart = () => lip.start();
     utter.onend = finish;
     utter.onerror = finish;
-    Partner.startTalkingAll();
+    lip.start();
     synth.speak(utter);
   });
+}
+
+/**
+ * 選んだ言語・話し相手の声で読み上げ、そのあいだ話し相手の口を動かす。
+ * opts: { lang, audio（会話APIが一緒に返した音声）, emotion, profile, voicePid, avatar }
+ */
+async function speak(text, opts = {}){
+  stopSpeech();
+  const token = speechToken;
+  const lang = opts.lang || state.lang;
+  const profile = opts.profile || Partner.profile();
+  const clean = String(text || "").replace(/[*_#`]/g, "").trim();
+  if (!clean) return;
+
+  if (useGemini()){
+    const key = ttsCacheKey(clean, lang, profile);
+    let audio = opts.audio || audioCache.get(key) || null;
+    if (!audio){
+      try{
+        const d = await callBackend("tts", { text: clean, lang, emotion: opts.emotion || "neutral", partnerProfile: profile }, 30000);
+        audio = d.audio || null;
+      }catch(err){
+        noteTtsFallback(err.message);
+      }
+      if (token !== speechToken) return;
+    }
+    if (audio){
+      cacheAudio(key, audio);
+      if (await playGeminiAudio(audio, token, opts.avatar)) return;
+      noteTtsFallback("再生できませんでした");
+    }
+  }
+  if (token !== speechToken) return;
+  await speakWithDevice(clean, lang, profile, opts.voicePid, opts.avatar, token);
 }
 
 /** 会話APIへ送る内容（言語と話し相手の名前も渡し、GAS側で言語・表情を決める） */
@@ -1214,7 +1406,9 @@ function chatPayload(history){
     context: state.transcriptSummary || "",
     lang: state.lang,
     langName: L().label,
-    partnerName: partnerName()
+    partnerName: partnerName(),
+    partnerProfile: Partner.profile(), // 人柄・話し方・会話の難しさ・声
+    tts: useGemini()                   // Gemini の声なら返事と一緒に音声も作ってもらう
   };
 }
 
@@ -1265,19 +1459,20 @@ async function startConversation(){
   Partner.setEmotionAll("joy");
   try{
     const data = await callBackendWithRetry("chatReply", chatPayload([]), 0);
-    await pushAiLine(data.reply);
+    if (data.ttsError) noteTtsFallback(data.ttsError);
+    await pushAiLine(data.reply, data.audio);
   }catch(err){
     await pushAiLine(L().start(state.theme));
   }
 }
 
-async function pushAiLine(raw){
+async function pushAiLine(raw, audio){
   const { text, emotion } = Partner.parseReply(raw);
   Partner.setEmotionAll(emotion);
   document.getElementById("ai-line").textContent = text;
   state.talkHistory.push({ role: "ai", text });
   addLogRow("ai", text);
-  await speak(text);
+  await speak(text, { audio, emotion });
   await settleAfterSpeak(); // 読み上げの残響がマイクに入らないよう少し待つ
   beginListenWindow();
 }
@@ -1296,7 +1491,7 @@ function beginListenWindow(){
     document.getElementById("you-line").textContent = "この端末は音声認識に対応していません。";
     return;
   }
-  synth && synth.cancel(); // Android等でTTSが完全に止まっていない状態を防ぐ保険
+  stopSpeech(); // Android等でTTSが完全に止まっていない状態を防ぐ保険
   countdownStart = performance.now();
   const ring = document.getElementById("ring-progress");
   const numEl = document.getElementById("timer-num");
@@ -1428,7 +1623,8 @@ async function continueConversation(){
   }
   try{
     const data = await callBackendWithRetry("chatReply", chatPayload(state.talkHistory), 1);
-    await pushAiLine(data.reply);
+    if (data.ttsError) noteTtsFallback(data.ttsError);
+    await pushAiLine(data.reply, data.audio);
   }catch(err){
     // Geminiが一時的に混雑していても会話を止めない
     await pushAiLine(L().again);
@@ -1437,7 +1633,7 @@ async function continueConversation(){
 
 async function callBackendWithRetry(action, payload, retries){
   try{
-    return await callBackend(action, payload);
+    return await callBackend(action, payload, payload && payload.tts ? 40000 : 12000);
   }catch(err){
     if (retries > 0){
       await new Promise(r => setTimeout(r, 900));
@@ -1458,7 +1654,7 @@ async function pushAiLineNoListen(raw){
 document.getElementById("end-talk-btn").addEventListener("click", () => {
   clearInterval(countdownTimer);
   if (recognizer){ try{ recognizer.stop(); }catch(e){} }
-  synth && synth.cancel();
+  stopSpeech();
   goToView("review");
   runEvaluation();
 });
