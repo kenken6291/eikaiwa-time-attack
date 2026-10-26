@@ -9,6 +9,8 @@
  *    - SHEET_ID        : 会員・ログ保存用スプレッドシートのID（logs / members の2シートを自動作成）
  *    - DRIVE_FOLDER_ID : 会話ログ保存用Googleドライブのフォルダ ID
  *    - PEPPER          : パスワードハッシュ化用の任意の固定文字列（例: 長いランダム文字列。無くても動くが設定推奨）
+ *    - ADMIN_EMAILS    : 「みんなの話し相手」を登録・編集できる管理者のメールアドレス（会員登録したもの。複数はカンマ区切り）
+ *    - PARTNER_FOLDER_ID : （任意）話し相手の写真を保存するフォルダID。未設定なら DRIVE_FOLDER_ID 内に「partners」フォルダを自動作成
  * 2. デプロイ > 新しいデプロイ > ウェブアプリ
  *    実行ユーザー: 自分 / アクセスできるユーザー: 全員
  * 3. 発行されたURLを config.js の GAS_URL に貼り付け
@@ -18,7 +20,7 @@
  */
 
 /** サーバー（GAS）のバージョン — コードを変更したらここも更新する */
-const GAS_VERSION = "2.1.0";
+const GAS_VERSION = "2.2.0";
 const GAS_UPDATED = "2026-10-26";
 
 const PROPS = PropertiesService.getScriptProperties();
@@ -142,6 +144,27 @@ function doPost(e) {
       case "deleteSession":
         result = deleteSession(req.sessionToken, req.index);
         break;
+
+      // --- 話し相手（マイ10人＋みんな共通10人）---
+      case "listPartners":
+        result = listPartners(req.sessionToken);
+        break;
+      case "savePartner":
+        result = savePartner(req.sessionToken, req);
+        break;
+      case "deletePartner":
+        result = deletePartner(req.sessionToken, req.id);
+        break;
+      case "uploadPartnerPhoto":
+        result = uploadPartnerPhoto(req.sessionToken, req.id, req.key, req.dataUrl);
+        break;
+      case "deletePartnerPhoto":
+        result = deletePartnerPhoto(req.sessionToken, req.id, req.key);
+        break;
+      case "clearPartnerPhotos":
+        result = clearPartnerPhotos(req.sessionToken, req.id);
+        break;
+
       default:
         result = { error: "unknown action: " + req.action };
     }
@@ -762,4 +785,176 @@ function saveTranscriptToDrive(folderId, req, now) {
   const fileName = `${now.toISOString().slice(0,10)}_${safeTheme}.txt`;
   const file = folder.createFile(fileName, content, MimeType.PLAIN_TEXT);
   return file.getUrl();
+}
+
+/* ============================================================
+   話し相手 — マイ話し相手（本人だけ・最大10人）／みんなの話し相手（全員共通・最大10人、管理者が登録）
+   写真は表情4種 × 顔/瞬き/しゃべり の最大12枚を Google ドライブに保存し、
+   「リンクを知っている全員が閲覧可」にして lh3.googleusercontent.com の URL で表示する
+   ============================================================ */
+const PARTNER_LIMIT = 10;
+const PARTNER_KEYS = ["neutral", "joy", "sad", "surprised"].reduce((a, e) =>
+  a.concat([e, e + "_blink", e + "_talk"]), []);
+
+function getPartnersSheet() {
+  const sheetId = PROPS.getProperty("SHEET_ID");
+  if (!sheetId) throw new Error("SHEET_ID が設定されていません");
+  const ss = SpreadsheetApp.openById(sheetId);
+  let sheet = ss.getSheetByName("partners");
+  if (!sheet) {
+    sheet = ss.insertSheet("partners");
+    sheet.appendRow(["id", "scope", "ownerUserId", "name", "photosJson", "sort", "updatedAt"]);
+  }
+  return sheet;
+}
+
+function getPartnerFolder() {
+  const own = PROPS.getProperty("PARTNER_FOLDER_ID");
+  if (own) return DriveApp.getFolderById(own);
+  const parentId = PROPS.getProperty("DRIVE_FOLDER_ID");
+  if (!parentId) throw new Error("DRIVE_FOLDER_ID（または PARTNER_FOLDER_ID）が設定されていません");
+  const parent = DriveApp.getFolderById(parentId);
+  const it = parent.getFoldersByName("partners");
+  return it.hasNext() ? it.next() : parent.createFolder("partners");
+}
+
+function isAdminUser(userId) {
+  const emails = String(PROPS.getProperty("ADMIN_EMAILS") || "")
+    .split(/[,\s]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+  if (!emails.length) return false;
+  const found = findMemberRowByUserId(getMembersSheet(), userId);
+  return !!found && emails.includes(String(found.data[1]).toLowerCase());
+}
+
+function partnerImgUrl(fileId) { return fileId ? "https://lh3.googleusercontent.com/d/" + fileId : ""; }
+
+function readPartners() {
+  const sheet = getPartnersSheet();
+  const last = sheet.getLastRow();
+  if (last < 2) return [];
+  return sheet.getRange(2, 1, last - 1, 7).getValues().map((r, i) => {
+    let photos = {};
+    try { photos = JSON.parse(r[4] || "{}") || {}; } catch (e) { photos = {}; }
+    return { row: i + 2, id: String(r[0]), scope: String(r[1]), owner: String(r[2]), name: String(r[3]),
+             photos, sort: Number(r[5]) || 0, updatedAt: r[6] };
+  }).filter(p => p.id);
+}
+
+function partnerToClient(p) {
+  const photos = {};
+  Object.keys(p.photos).forEach(k => { if (p.photos[k]) photos[k] = partnerImgUrl(p.photos[k]); });
+  return { id: p.id, scope: p.scope, name: p.name, photos };
+}
+
+function listPartners(sessionToken) {
+  const userId = requireSession(sessionToken);
+  const all = readPartners().sort((a, b) => a.sort - b.sort);
+  return {
+    mine: all.filter(p => p.scope === "mine" && p.owner === userId).map(partnerToClient),
+    shared: all.filter(p => p.scope === "shared").map(partnerToClient),
+    isAdmin: isAdminUser(userId),
+    limit: PARTNER_LIMIT
+  };
+}
+
+/** 編集権限のある話し相手を返す（マイ＝本人のもの、みんな＝管理者のみ） */
+function getEditablePartner(userId, id) {
+  const p = readPartners().find(x => x.id === String(id));
+  if (!p) throw new Error("話し相手が見つかりません");
+  const ok = p.scope === "shared" ? isAdminUser(userId) : p.owner === userId;
+  if (!ok) throw new Error("この話し相手を編集する権限がありません");
+  return p;
+}
+
+function withLock(fn) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try { return fn(); } finally { lock.releaseLock(); }
+}
+
+function cleanPartnerName(name) {
+  const n = String(name || "").trim().slice(0, 16);
+  if (!n) throw new Error("名前を入力してください");
+  return n;
+}
+
+function savePartner(sessionToken, req) {
+  const userId = requireSession(sessionToken);
+  return withLock(() => {
+    const sheet = getPartnersSheet();
+    if (req.id) {
+      const p = getEditablePartner(userId, req.id);
+      p.name = cleanPartnerName(req.name);
+      sheet.getRange(p.row, 4).setValue(p.name);
+      sheet.getRange(p.row, 7).setValue(new Date());
+      return { partner: partnerToClient(p) };
+    }
+    const scope = req.scope === "shared" ? "shared" : "mine";
+    if (scope === "shared" && !isAdminUser(userId)) throw new Error("みんなの話し相手は管理者だけが登録できます");
+    const all = readPartners();
+    const count = all.filter(p => scope === "shared" ? p.scope === "shared" : (p.scope === "mine" && p.owner === userId)).length;
+    if (count >= PARTNER_LIMIT) throw new Error(`話し相手は${PARTNER_LIMIT}人まで登録できます`);
+    const p = { id: Utilities.getUuid(), scope, owner: scope === "mine" ? userId : "", name: cleanPartnerName(req.name), photos: {} };
+    sheet.appendRow([p.id, p.scope, p.owner, p.name, "{}", Date.now(), new Date()]);
+    return { partner: partnerToClient(p) };
+  });
+}
+
+function trashFileQuietly(fileId) {
+  if (!fileId) return;
+  try { DriveApp.getFileById(fileId).setTrashed(true); } catch (e) { /* 既に無い場合は無視 */ }
+}
+
+function deletePartner(sessionToken, id) {
+  const userId = requireSession(sessionToken);
+  return withLock(() => {
+    const p = getEditablePartner(userId, id);
+    Object.keys(p.photos).forEach(k => trashFileQuietly(p.photos[k]));
+    getPartnersSheet().deleteRow(p.row);
+    return { ok: true };
+  });
+}
+
+function uploadPartnerPhoto(sessionToken, id, key, dataUrl) {
+  const userId = requireSession(sessionToken);
+  if (!PARTNER_KEYS.includes(key)) throw new Error("写真の種類が正しくありません");
+  const m = String(dataUrl || "").match(/^data:(image\/(jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!m) throw new Error("画像データが正しくありません");
+  if (m[3].length > 4 * 1024 * 1024) throw new Error("画像が大きすぎます");
+
+  return withLock(() => {
+    const p = getEditablePartner(userId, id);
+    const ext = m[2] === "jpeg" ? "jpg" : m[2];
+    const blob = Utilities.newBlob(Utilities.base64Decode(m[3]), m[1], `${p.scope}_${p.id}_${key}.${ext}`);
+    const file = getPartnerFolder().createFile(blob);
+    try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) { /* 共有設定できない環境では表示できない可能性あり */ }
+    trashFileQuietly(p.photos[key]);
+    p.photos[key] = file.getId();
+    const sheet = getPartnersSheet();
+    sheet.getRange(p.row, 5).setValue(JSON.stringify(p.photos));
+    sheet.getRange(p.row, 7).setValue(new Date());
+    return { url: partnerImgUrl(file.getId()), partner: partnerToClient(p) };
+  });
+}
+
+function deletePartnerPhoto(sessionToken, id, key) {
+  const userId = requireSession(sessionToken);
+  return withLock(() => {
+    const p = getEditablePartner(userId, id);
+    trashFileQuietly(p.photos[key]);
+    delete p.photos[key];
+    getPartnersSheet().getRange(p.row, 5).setValue(JSON.stringify(p.photos));
+    return { partner: partnerToClient(p) };
+  });
+}
+
+function clearPartnerPhotos(sessionToken, id) {
+  const userId = requireSession(sessionToken);
+  return withLock(() => {
+    const p = getEditablePartner(userId, id);
+    Object.keys(p.photos).forEach(k => trashFileQuietly(p.photos[k]));
+    p.photos = {};
+    getPartnersSheet().getRange(p.row, 5).setValue("{}");
+    return { partner: partnerToClient(p) };
+  });
 }

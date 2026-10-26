@@ -4,7 +4,7 @@
    GASウェブアプリのURLは config.js で設定してください
    ============================================================ */
 /** フロントエンドのバージョン — ファイルを更新したらここも更新する */
-const APP_VERSION = "2.1.0";
+const APP_VERSION = "2.2.0";
 const APP_UPDATED = "2026-10-26";
 
 const GAS_URL = String(window.GAS_URL || "");
@@ -149,6 +149,7 @@ function completeLogin(sessionToken, nickname){
   goToView("theme");
   restoreProgress(); // 進行中のテーマ・単語・四択があれば復元し、どのステップからでも共有されるようにする
   setLang(state.lang);
+  Partner.refresh().then(() => Partner.load(state.lang)).catch(() => {}); // マイ／みんなの話し相手を読み込む
 }
 
 function logout(){
@@ -156,6 +157,7 @@ function logout(){
   auth = { sessionToken: null, nickname: null };
   localStorage.removeItem("speakin3_session");
   clearProgress();
+  Partner.reset();
   document.getElementById("app-screen").hidden = true;
   document.getElementById("auth-screen").hidden = false;
   switchAuthTab("login");
@@ -175,7 +177,7 @@ document.getElementById("menu-logout-btn").addEventListener("click", () => {
 });
 document.getElementById("menu-partner-btn").addEventListener("click", () => {
   document.getElementById("account-menu").hidden = true;
-  Partner.openSettings(state.lang);
+  Partner.openPicker();
 });
 document.getElementById("menu-nickname-btn").addEventListener("click", () => {
   document.getElementById("account-menu").hidden = true;
@@ -393,8 +395,11 @@ function updateLangNote(){
   }
 }
 
-document.getElementById("theme-partner-btn").addEventListener("click", () => Partner.openSettings(state.lang));
-document.querySelectorAll("[data-open-partner]").forEach(b => b.addEventListener("click", () => Partner.openSettings(state.lang)));
+document.getElementById("theme-partner-btn").addEventListener("click", () => Partner.openPicker());
+document.querySelectorAll("[data-open-partner]").forEach(b => b.addEventListener("click", () => {
+  stopActiveStepProcesses();
+  Partner.openPicker();
+}));
 
 /* ---------- 画面遷移 ---------- */
 const STEP_ORDER = ["theme","study","quiz","normal","talk","review"];

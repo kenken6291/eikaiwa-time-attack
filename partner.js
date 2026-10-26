@@ -1,8 +1,9 @@
 /* ============================================================
    Speak in 3 — 多言語対応 ＆ 話し相手（写真アバター）
    ・7言語（英語/スペイン語/中国語/ポルトガル語/韓国語/フランス語/ドイツ語）
-   ・話し相手の写真：普通/笑顔/困り顔/驚き × 顔/瞬き/しゃべり（最大12枚）
-     読み込み順：この端末に登録した写真 → partners/<言語コード>/ → partners/common/ → イラスト
+   ・話し相手：マイ話し相手（本人だけ・10人）＋みんなの話し相手（全員共通・10人、管理者が登録）
+     ＋標準のイラスト。いつでも切り替え可能
+   ・写真：普通/笑顔/困り顔/驚き × 顔/瞬き/しゃべり（最大12枚）をサーバー（Googleドライブ）に保存
    ============================================================ */
 
 const LANGS = {
@@ -74,7 +75,10 @@ const Partner = (() => {
   const KIND_LABELS = { base: "顔", blink: "瞬き", talk: "しゃべり" };
   const key = (emo, kind) => kind === "base" ? emo : `${emo}_${kind}`;
   const ALL_KEYS = EMOS.flatMap(e => KINDS.map(k => key(e, k)));
-  const SETTINGS_KEY = "speakin3_partner_settings";
+  const LIMIT = 10;
+  const CUR_KEY = "speakin3_partner_current";
+  const VOICE_KEY = "speakin3_partner_voices";
+  const SCOPE_LABEL = { mine: "マイ話し相手", shared: "みんなの話し相手", default: "標準" };
   const PALETTE = {
     en: { bg: "#DBE7FB", hair: "#5A3B2A", skin: "#F3D2BB", shirt: "#3F6FD8" },
     es: { bg: "#FDE3D6", hair: "#2B1D16", skin: "#E8B993", shirt: "#E0543F" },
@@ -84,107 +88,86 @@ const Partner = (() => {
     fr: { bg: "#E3E8F6", hair: "#B88A4A", skin: "#F4D4BF", shirt: "#2C3E75" },
     de: { bg: "#ECECEC", hair: "#D9B46A", skin: "#F6DCCB", shirt: "#4A4A4A" }
   };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const store = {
+    get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
+    set(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
+  };
 
-  /* ---------- 設定（名前・声）---------- */
-  let settings = {};
-  try{ settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") || {}; }catch(e){ settings = {}; }
-  function saveSettings(){ try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }catch(e){} }
-  function conf(lang){ return settings[lang] || (settings[lang] = {}); }
-  function name(lang){ return (settings[lang] && settings[lang].name) || getLang(lang).partner; }
+  /* ---------- 話し相手の一覧（サーバー）と選択中の話し相手 ---------- */
+  let data = { mine: [], shared: [], isAdmin: false, loaded: false };
+  let currentId = store.get(CUR_KEY) || "default";
+  let currentLang = "en";
 
-  /* ---------- 声 ---------- */
+  const all = () => data.mine.concat(data.shared);
+  const find = id => all().find(p => p.id === id) || null;
+  const current = () => find(currentId);
+  function name(lang){
+    const p = current();
+    return p ? p.name : getLang(lang || currentLang).partner;
+  }
+  function scopeOf(id){
+    if (data.mine.some(p => p.id === id)) return "mine";
+    if (data.shared.some(p => p.id === id)) return "shared";
+    return "default";
+  }
+  function canEdit(p){ return !!p && (p.scope === "mine" || (p.scope === "shared" && data.isAdmin)); }
+
+  async function refresh(){
+    const res = await callBackend("listPartners", {}, 20000);
+    data = { mine: res.mine || [], shared: res.shared || [], isAdmin: !!res.isAdmin, loaded: true };
+    if (currentId !== "default" && !current()) select("default");
+    return data;
+  }
+  function reset(){
+    data = { mine: [], shared: [], isAdmin: false, loaded: false };
+    load(currentLang);
+  }
+  function select(id){
+    currentId = id || "default";
+    store.set(CUR_KEY, currentId);
+    load(currentLang);
+  }
+
+  /* ---------- 声（端末ごと。話し相手×言語ごとに選べる）---------- */
   const synth = window.speechSynthesis;
+  let voicePrefs = {};
+  try{ voicePrefs = JSON.parse(store.get(VOICE_KEY) || "{}") || {}; }catch(e){ voicePrefs = {}; }
   const norm = l => String(l || "").toLowerCase().replace("_", "-");
   function voicesFor(lang){
     if (!synth) return [];
     const code = norm(getLang(lang).speech);
     const pre = code.split("-")[0];
     const list = (synth.getVoices() || []).filter(v => norm(v.lang).startsWith(pre));
-    // 同じ言語でも地域が一致するものを先頭に
     return list.sort((a, b) => (norm(b.lang) === code) - (norm(a.lang) === code));
   }
-  function pickVoice(lang){
+  function voicePref(pid, lang){ return (voicePrefs[pid] && voicePrefs[pid][lang]) || ""; }
+  function setVoicePref(pid, lang, uri){
+    (voicePrefs[pid] = voicePrefs[pid] || {})[lang] = uri;
+    store.set(VOICE_KEY, JSON.stringify(voicePrefs));
+  }
+  function pickVoiceFor(pid, lang){
     const list = voicesFor(lang);
-    const want = settings[lang] && settings[lang].voiceURI;
+    const want = voicePref(pid, lang);
     return (want && list.find(v => v.voiceURI === want)) || list[0] || null;
   }
+  const pickVoice = lang => pickVoiceFor(currentId, lang);
 
-  /* ---------- 写真の保存（この端末の IndexedDB）---------- */
-  let dbp = null;
-  function db(){
-    if (dbp) return dbp;
-    dbp = new Promise((res, rej) => {
-      if (!window.indexedDB){ rej(new Error("IndexedDB未対応")); return; }
-      const req = indexedDB.open("speakin3_partner", 1);
-      req.onupgradeneeded = () => req.result.createObjectStore("photos");
-      req.onsuccess = () => res(req.result);
-      req.onerror = () => rej(req.error);
-    });
-    return dbp;
-  }
-  async function idb(mode, fn){
-    const d = await db();
-    return new Promise((res, rej) => {
-      const tx = d.transaction("photos", mode);
-      const r = fn(tx.objectStore("photos"));
-      let out;
-      if (r) r.onsuccess = () => { out = r.result; };
-      tx.oncomplete = () => res(out);
-      tx.onerror = () => rej(tx.error);
-    });
-  }
-  const getPhoto = (lang, k) => idb("readonly", st => st.get(`${lang}:${k}`)).catch(() => null);
-  const putPhoto = (lang, k, blob) => idb("readwrite", st => st.put(blob, `${lang}:${k}`));
-  const delPhoto = (lang, k) => idb("readwrite", st => st.delete(`${lang}:${k}`));
-
-  const localUrls = {};
-  async function localPhotos(lang){
-    (localUrls[lang] || []).forEach(u => URL.revokeObjectURL(u));
-    localUrls[lang] = [];
-    const out = {};
-    for (const k of ALL_KEYS){
-      const b = await getPhoto(lang, k);
-      if (b){ const u = URL.createObjectURL(b); out[k] = u; localUrls[lang].push(u); }
-    }
-    return out;
-  }
-
-  /* ---------- リポジトリ内の写真（partners/<lang>/neutral.jpg など）---------- */
-  function probe(url){
-    return new Promise(res => {
-      const im = new Image();
-      im.onload = () => res(url);
-      im.onerror = () => res(null);
-      im.src = url;
-    });
-  }
-  const repoCache = {};
-  async function repoPhotos(dir){
-    if (repoCache[dir]) return repoCache[dir];
-    const out = {};
-    if (await probe(`partners/${dir}/neutral.jpg`)){
-      await Promise.all(ALL_KEYS.map(async k => {
-        const u = await probe(`partners/${dir}/${k}.jpg`);
-        if (u) out[k] = u;
-      }));
-    }
-    repoCache[dir] = out;
-    return out;
-  }
-
-  async function imagesFor(lang){
-    const local = await localPhotos(lang);
-    if (local.neutral) return local;
-    const repo = await repoPhotos(lang);
-    if (repo.neutral) return repo;
-    const common = await repoPhotos("common");
-    if (common.neutral) return common;
-    return {};
+  function sayWith(pid, lang, text, avatar){
+    if (!synth) return;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = getLang(lang).speech;
+    const v = pickVoiceFor(pid, lang);
+    if (v) u.voice = v;
+    if (avatar){ avatar.setEmotion("joy"); avatar.startTalking(); }
+    const end = () => avatar && avatar.stopTalking();
+    u.onend = end; u.onerror = end;
+    synth.speak(u);
   }
 
   /* ---------- アバター ---------- */
   const avatars = new Set();
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   function svgFace(lang){
     const p = PALETTE[lang] || PALETTE.en;
@@ -237,9 +220,9 @@ const Partner = (() => {
           const src = k => images[key(own ? e : "neutral", k)];
           const talk = src("talk"), blink = src("blink");
           return `<div class="pa-group${talk ? "" : " no-talk"}" data-emo="${e}">
-            <img class="pa-base" src="${src("base")}" alt="">
-            ${talk ? `<img class="pa-talk" src="${talk}" alt="">` : ""}
-            ${blink ? `<img class="pa-blink" src="${blink}" alt="">` : ""}
+            <img class="pa-base" src="${escapeHtml(src("base"))}" alt="">
+            ${talk ? `<img class="pa-talk" src="${escapeHtml(talk)}" alt="">` : ""}
+            ${blink ? `<img class="pa-blink" src="${escapeHtml(blink)}" alt="">` : ""}
           </div>`;
         }).join("");
       } else {
@@ -287,12 +270,12 @@ const Partner = (() => {
     }
   }
 
-  let currentLang = "en";
-  async function load(lang){
-    currentLang = lang;
-    const images = await imagesFor(lang);
-    if (lang !== currentLang) return; // 読み込み中に言語が切り替わった
-    avatars.forEach(a => { if (!a.el.dataset.fixedLang) a.render(images, lang); });
+  function photosOf(p){ return (p && p.photos && p.photos.neutral) ? p.photos : {}; }
+
+  function load(lang){
+    currentLang = lang || currentLang;
+    const images = photosOf(current());
+    avatars.forEach(a => { if (!a.el.dataset.fixed) a.render(images, currentLang); });
     refreshLabels();
   }
   function refreshLabels(){
@@ -300,9 +283,10 @@ const Partner = (() => {
     document.querySelectorAll("[data-partner-name]").forEach(el => el.textContent = name(currentLang));
     document.querySelectorAll("[data-partner-flag]").forEach(el => el.textContent = L.flag);
     document.querySelectorAll("[data-partner-lang]").forEach(el => el.textContent = L.label);
+    document.querySelectorAll("[data-partner-scope]").forEach(el => el.textContent = SCOPE_LABEL[scopeOf(currentId)]);
   }
   const setEmotionAll = e => avatars.forEach(a => a.setEmotion(e));
-  const startTalkingAll = () => avatars.forEach(a => a.startTalking());
+  const startTalkingAll = () => avatars.forEach(a => { if (!a.el.dataset.fixed) a.startTalking(); });
   const stopTalkingAll = () => avatars.forEach(a => a.stopTalking());
 
   /* ---------- 返答から表情タグを取り出す（GASが先頭に [joy] などを付けて返す）---------- */
@@ -327,20 +311,20 @@ const Partner = (() => {
     return "neutral";
   }
 
-  /* ---------- 画像の読み込み（正方形に切り抜き・縮小）---------- */
-  function fileToSquareJpeg(file, size = 560){
+  /* ---------- 画像の読み込み（正方形に切り抜き・縮小 → dataURL）---------- */
+  function fileToSquareDataUrl(file, size = 560){
     return new Promise((res, rej) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
         const s = Math.min(img.naturalWidth, img.naturalHeight);
         const sx = (img.naturalWidth - s) / 2;
-        const sy = Math.max(0, (img.naturalHeight - s) / 2 - (img.naturalHeight - s) * 0.15); // 縦長は少し上寄りに（顔が上にあることが多いため）
+        const sy = Math.max(0, (img.naturalHeight - s) / 2 - (img.naturalHeight - s) * 0.15); // 縦長は少し上寄りに
         const c = document.createElement("canvas");
         c.width = c.height = Math.min(size, s);
         c.getContext("2d").drawImage(img, sx, sy, s, s, 0, 0, c.width, c.height);
         URL.revokeObjectURL(url);
-        c.toBlob(b => b ? res(b) : rej(new Error("画像の変換に失敗しました")), "image/jpeg", 0.86);
+        res(c.toDataURL("image/jpeg", 0.86));
       };
       img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("画像を読み込めませんでした")); };
       img.src = url;
@@ -361,41 +345,127 @@ const Partner = (() => {
     return emo ? key(emo, kind) : null;
   }
 
-  /* ---------- 話し相手の設定モーダル ---------- */
+  /* ============================================================
+     話し相手を選ぶ／編集する モーダル
+     ============================================================ */
+  let tab = "mine";
+  let editId = null;
   let modalAvatar = null;
-  let editLang = "en";
 
-  async function openSettings(lang){
-    editLang = lang || currentLang;
-    openModal(`<div id="pm-root"></div>`);
+  function root(){ return document.getElementById("pm-root"); }
+  function msg(t, ok){
+    const el = document.getElementById("pm-msg");
+    if (el){ el.textContent = t || ""; el.classList.toggle("ok", !!ok); }
+  }
+  function destroyModalAvatar(){ if (modalAvatar){ modalAvatar.destroy(); modalAvatar = null; } }
+
+  async function openPicker(){
+    editId = null;
+    tab = scopeOf(currentId) === "shared" ? "shared" : "mine";
+    openModal(`<div id="pm-root"><div class="loader"><div class="ring"></div><p>読み込み中…</p></div></div>`);
     document.getElementById("modal-card").classList.add("wide");
-    await renderSettings();
+    try{ await refresh(); }catch(err){ /* 一覧が取れなくても標準は選べる */ }
+    renderPicker();
   }
 
-  async function renderSettings(){
-    const root = document.getElementById("pm-root");
-    if (!root) return;
-    const L = getLang(editLang);
-    const local = await localPhotos(editLang);
-    const voices = voicesFor(editLang);
-    const curVoice = (settings[editLang] && settings[editLang].voiceURI) || "";
+  function thumbHTML(p){
+    const u = p && p.photos && p.photos.neutral;
+    return u ? `<img src="${escapeHtml(u)}" alt="" loading="lazy">` : svgFace(currentLang);
+  }
 
-    root.innerHTML = `
-      <h3>話し相手の設定</h3>
-      <div class="pm-row">
-        <label for="pm-lang">言語</label>
-        <select id="pm-lang">${LANG_ORDER.map(c => `<option value="${c}"${c === editLang ? " selected" : ""}>${LANGS[c].flag} ${LANGS[c].label}</option>`).join("")}</select>
+  function renderPicker(){
+    const r = root(); if (!r) return;
+    destroyModalAvatar();
+    editId = null;
+    const list = tab === "mine" ? data.mine : data.shared;
+    const editable = tab === "mine" || data.isAdmin;
+    const tile = (p, id) => {
+      const sel = currentId === id;
+      return `<div class="pm-tile${sel ? " selected" : ""}" data-pick="${escapeHtml(id)}">
+        <div class="pm-thumb">${thumbHTML(p)}</div>
+        <div class="pm-tile-name">${escapeHtml(p ? p.name : `標準（${getLang(currentLang).partner}）`)}</div>
+        ${sel ? `<span class="pm-check">✓</span>` : ""}
+        ${p && canEdit(p) ? `<button type="button" class="pm-edit" data-edit="${escapeHtml(id)}" aria-label="編集">✎</button>` : ""}
+      </div>`;
+    };
+    r.innerHTML = `
+      <h3>話し相手を選ぶ</h3>
+      <div class="auth-tabs pm-tabs">
+        <button type="button" class="auth-tab${tab === "mine" ? " active" : ""}" data-tab-pm="mine">マイ話し相手 ${data.mine.length}/${LIMIT}</button>
+        <button type="button" class="auth-tab${tab === "shared" ? " active" : ""}" data-tab-pm="shared">みんなの話し相手 ${data.shared.length}/${LIMIT}</button>
       </div>
+      <p class="pm-note">${tab === "mine"
+        ? "あなただけが使える話し相手です。どの端末からログインしても使えます。"
+        : (data.isAdmin ? "全員が使える話し相手です（管理者として編集できます）。" : "管理者が用意した、全員が使える話し相手です。")}</p>
+      <div class="pm-tiles">
+        ${tab === "mine" ? tile(null, "default") : ""}
+        ${list.map(p => tile(p, p.id)).join("")}
+        ${editable && list.length < LIMIT ? `<button type="button" class="pm-tile pm-add" id="pm-add"><span>＋</span><div class="pm-tile-name">新しく追加</div></button>` : ""}
+      </div>
+      ${!data.loaded ? `<p class="pm-note warn">サーバーから話し相手を読み込めませんでした。時間をおいて開き直してください。</p>` : ""}
+      ${tab === "shared" && !list.length ? `<p class="pm-note">まだ登録されていません。</p>` : ""}
+      <p class="auth-msg" id="pm-msg"></p>
+      <div class="modal-actions"><button type="button" class="btn-primary" id="pm-close">閉じる</button></div>
+    `;
+    r.querySelectorAll("[data-tab-pm]").forEach(b => b.addEventListener("click", () => { tab = b.dataset.tabPm; renderPicker(); }));
+    r.querySelectorAll("[data-pick]").forEach(t => t.addEventListener("click", e => {
+      if (e.target.closest(".pm-edit")) return;
+      select(t.dataset.pick);
+      renderPicker();
+      const p = current();
+      sayWith(currentId, currentLang, getLang(currentLang).hello, null);
+      msg(`${p ? p.name : "標準"} に切り替えました`, true);
+    }));
+    r.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => openEditor(b.dataset.edit)));
+    const add = document.getElementById("pm-add");
+    if (add) add.addEventListener("click", async () => {
+      add.disabled = true;
+      msg("追加しています…");
+      try{
+        const res = await callBackend("savePartner", { scope: tab, name: `話し相手${list.length + 1}` }, 20000);
+        (tab === "mine" ? data.mine : data.shared).push(res.partner);
+        openEditor(res.partner.id);
+      }catch(err){ msg(err.message); add.disabled = false; }
+    });
+    document.getElementById("pm-close").addEventListener("click", closeModal);
+  }
+
+  function openEditor(id){
+    editId = id;
+    renderEditor();
+  }
+
+  function replacePartner(updated){
+    ["mine", "shared"].forEach(s => {
+      const i = data[s].findIndex(p => p.id === updated.id);
+      if (i >= 0) data[s][i] = updated;
+    });
+    if (updated.id === currentId) load(currentLang);
+  }
+
+  function renderEditor(){
+    const r = root(); if (!r) return;
+    const p = find(editId);
+    if (!p){ renderPicker(); return; }
+    const L = getLang(currentLang);
+    const voices = voicesFor(currentLang);
+    const curVoice = voicePref(p.id, currentLang);
+    const photos = p.photos || {};
+
+    r.innerHTML = `
+      <button type="button" class="pm-back" id="pm-back">← 一覧へ戻る</button>
+      <h3>${escapeHtml(SCOPE_LABEL[p.scope] || "")}を編集</h3>
       <div class="pm-preview">
-        <div class="pm-avatar" id="pm-avatar"></div>
+        <div id="pm-avatar"></div>
         <div class="pm-preview-side">
           <div class="pm-emo-btns">${EMOS.map(e => `<button type="button" class="chip" data-pm-emo="${e}">${EMO_LABELS[e]}</button>`).join("")}</div>
-          <button type="button" class="btn-secondary pm-say" id="pm-say">▶ 試しに話す</button>
+          <button type="button" class="btn-secondary pm-say" id="pm-say">▶ 試しに話す（${escapeHtml(L.label)}）</button>
+          <button type="button" class="btn-primary pm-use" id="pm-use">${currentId === p.id ? "✓ 使用中" : "この話し相手を使う"}</button>
         </div>
       </div>
       <div class="pm-row">
         <label for="pm-name">名前</label>
-        <input type="text" id="pm-name" maxlength="16" value="${escapeHtml(name(editLang))}">
+        <input type="text" id="pm-name" maxlength="16" value="${escapeHtml(p.name)}">
       </div>
       <div class="pm-row">
         <label for="pm-voice">声</label>
@@ -404,6 +474,7 @@ const Partner = (() => {
           ${voices.map(v => `<option value="${escapeHtml(v.voiceURI)}"${v.voiceURI === curVoice ? " selected" : ""}>${escapeHtml(v.name)}（${escapeHtml(v.lang)}）</option>`).join("")}
         </select>
       </div>
+      <p class="pm-note">声は言語ごと・端末ごとに選べます（いまの練習言語：${escapeHtml(L.label)}）。</p>
       ${voices.length ? "" : `<p class="pm-note warn">この端末には${escapeHtml(L.label)}の声が見つかりません。端末の音声設定で${escapeHtml(L.label)}の読み上げ音声を追加してください。</p>`}
 
       <h4 class="pm-sub">写真（表情ごとに 顔・瞬き・しゃべり）</h4>
@@ -414,9 +485,9 @@ const Partner = (() => {
           <div class="pm-emo">${EMO_LABELS[e]}</div>
           ${KINDS.map(k => {
             const kk = key(e, k);
-            const u = local[kk];
+            const u = photos[kk];
             return `<div class="pm-slot${u ? " has" : ""}" data-key="${kk}">
-              ${u ? `<img src="${u}" alt="">` : `<span>＋</span>`}
+              ${u ? `<img src="${escapeHtml(u)}" alt="" loading="lazy">` : `<span>＋</span>`}
               ${u ? `<button type="button" class="pm-del" data-del="${kk}" aria-label="削除">×</button>` : ""}
             </div>`;
           }).join("")}
@@ -428,108 +499,122 @@ const Partner = (() => {
         <button type="button" class="btn-secondary" id="pm-bulk-btn">まとめて選ぶ</button>
         <button type="button" class="btn-secondary pm-danger" id="pm-clear">写真をすべて削除</button>
       </div>
-      <p class="pm-note">まとめて選ぶ場合はファイル名で自動振り分けします（例：neutral.jpg / neutral_blink.jpg / joy_talk.jpg / 困り顔_瞬き.jpg）。写真はこの端末だけに保存されます。</p>
+      <p class="pm-note">まとめて選ぶ場合はファイル名で自動振り分けします（例：neutral.jpg / neutral_blink.jpg / joy_talk.jpg / 困り顔_瞬き.jpg）。</p>
       <p class="auth-msg" id="pm-msg"></p>
-      <div class="modal-actions"><button type="button" class="btn-primary" id="pm-close">閉じる</button></div>
+      <div class="pm-bulk-row">
+        <button type="button" class="btn-secondary pm-danger" id="pm-delete">この話し相手を削除</button>
+        <button type="button" class="btn-primary" id="pm-done">完了</button>
+      </div>
     `;
 
-    if (modalAvatar) modalAvatar.destroy();
+    destroyModalAvatar();
     modalAvatar = new Avatar(document.getElementById("pm-avatar"));
-    modalAvatar.el.dataset.fixedLang = "1";
-    modalAvatar.render(local.neutral ? local : await imagesFor(editLang), editLang);
+    modalAvatar.el.dataset.fixed = "1";
+    modalAvatar.render(photosOf(p), currentLang);
+
+    const busy = on => r.querySelectorAll("button, input, select").forEach(x => { if (x.id !== "pm-back") x.disabled = on; });
+
+    document.getElementById("pm-back").addEventListener("click", renderPicker);
+    document.getElementById("pm-done").addEventListener("click", renderPicker);
+    document.getElementById("pm-use").addEventListener("click", () => { select(p.id); renderEditor(); msg(`${p.name} に切り替えました`, true); });
+    r.querySelectorAll("[data-pm-emo]").forEach(b => b.addEventListener("click", () => modalAvatar.setEmotion(b.dataset.pmEmo)));
+    document.getElementById("pm-say").addEventListener("click", () => sayWith(p.id, currentLang, getLang(currentLang).hello, modalAvatar));
+
+    document.getElementById("pm-name").addEventListener("change", async e => {
+      const nm = e.target.value.trim();
+      if (!nm){ e.target.value = p.name; return; }
+      msg("保存中…");
+      try{
+        const res = await callBackend("savePartner", { id: p.id, name: nm }, 20000);
+        replacePartner(Object.assign({}, p, { name: res.partner.name }));
+        refreshLabels();
+        msg("名前を保存しました", true);
+      }catch(err){ msg(err.message); }
+    });
+    document.getElementById("pm-voice").addEventListener("change", e => setVoicePref(p.id, currentLang, e.target.value));
 
     let pendingKey = null;
     const fileInput = document.getElementById("pm-file");
-    const msg = t => { const el = document.getElementById("pm-msg"); if (el) el.textContent = t || ""; };
-
-    document.getElementById("pm-lang").addEventListener("change", e => { editLang = e.target.value; renderSettings(); });
-    document.getElementById("pm-name").addEventListener("change", e => {
-      conf(editLang).name = e.target.value.trim();
-      saveSettings();
-      refreshLabels();
-    });
-    document.getElementById("pm-voice").addEventListener("change", e => {
-      conf(editLang).voiceURI = e.target.value;
-      saveSettings();
-    });
-    root.querySelectorAll("[data-pm-emo]").forEach(b => b.addEventListener("click", () => modalAvatar.setEmotion(b.dataset.pmEmo)));
-    document.getElementById("pm-say").addEventListener("click", () => {
-      if (!synth) return;
-      synth.cancel();
-      const u = new SpeechSynthesisUtterance(getLang(editLang).hello);
-      u.lang = getLang(editLang).speech;
-      const v = pickVoice(editLang);
-      if (v) u.voice = v;
-      modalAvatar.setEmotion("joy");
-      modalAvatar.startTalking();
-      const end = () => modalAvatar && modalAvatar.stopTalking();
-      u.onend = end; u.onerror = end;
-      synth.speak(u);
-    });
-    root.querySelectorAll(".pm-slot").forEach(slot => slot.addEventListener("click", e => {
+    r.querySelectorAll(".pm-slot").forEach(slot => slot.addEventListener("click", e => {
       if (e.target.closest(".pm-del")) return;
       pendingKey = slot.dataset.key;
       fileInput.value = "";
       fileInput.click();
     }));
+    const upload = async (k, file) => {
+      const dataUrl = await fileToSquareDataUrl(file);
+      const res = await callBackend("uploadPartnerPhoto", { id: p.id, key: k, dataUrl }, 60000);
+      replacePartner(res.partner);
+    };
     fileInput.addEventListener("change", async () => {
       const f = fileInput.files && fileInput.files[0];
       if (!f || !pendingKey) return;
-      try{
-        msg("保存中…");
-        await putPhoto(editLang, pendingKey, await fileToSquareJpeg(f));
-        msg("");
-        await afterPhotoChange();
-      }catch(err){ msg("保存できませんでした：" + err.message); }
+      busy(true); msg("アップロード中…");
+      try{ await upload(pendingKey, f); renderEditor(); msg("保存しました", true); }
+      catch(err){ busy(false); msg("保存できませんでした：" + err.message); }
     });
-    root.querySelectorAll(".pm-del").forEach(b => b.addEventListener("click", async () => {
-      await delPhoto(editLang, b.dataset.del).catch(() => {});
-      await afterPhotoChange();
+    r.querySelectorAll(".pm-del").forEach(b => b.addEventListener("click", async () => {
+      busy(true); msg("削除中…");
+      try{
+        const res = await callBackend("deletePartnerPhoto", { id: p.id, key: b.dataset.del }, 20000);
+        replacePartner(res.partner); renderEditor();
+      }catch(err){ busy(false); msg(err.message); }
     }));
     const bulk = document.getElementById("pm-bulk");
     document.getElementById("pm-bulk-btn").addEventListener("click", () => { bulk.value = ""; bulk.click(); });
     bulk.addEventListener("change", async () => {
       const files = Array.from(bulk.files || []);
       if (!files.length) return;
+      busy(true);
       let ok = 0; const skipped = [];
-      msg("保存中…");
       for (const f of files){
         const k = keyFromFilename(f.name);
         if (!k){ skipped.push(f.name); continue; }
-        try{ await putPhoto(editLang, k, await fileToSquareJpeg(f)); ok++; }catch(e){ skipped.push(f.name); }
+        msg(`アップロード中…（${ok + 1}/${files.length}）`);
+        try{ await upload(k, f); ok++; }catch(e){ skipped.push(f.name); }
       }
-      await afterPhotoChange();
-      msg(`${ok}枚を登録しました。` + (skipped.length ? ` 振り分けできなかったファイル：${skipped.join("、")}` : ""));
+      renderEditor();
+      msg(`${ok}枚を登録しました。` + (skipped.length ? ` 登録できなかったファイル：${skipped.join("、")}` : ""), !skipped.length);
     });
     document.getElementById("pm-clear").addEventListener("click", async () => {
-      if (!confirm(`${L.label}の話し相手の写真をすべて削除しますか？`)) return;
-      for (const k of ALL_KEYS) await delPhoto(editLang, k).catch(() => {});
-      await afterPhotoChange();
+      if (!confirm(`${p.name} の写真をすべて削除しますか？`)) return;
+      busy(true); msg("削除中…");
+      try{
+        const res = await callBackend("clearPartnerPhotos", { id: p.id }, 30000);
+        replacePartner(res.partner); renderEditor();
+      }catch(err){ busy(false); msg(err.message); }
     });
-    document.getElementById("pm-close").addEventListener("click", () => { closeModal(); });
-  }
-
-  async function afterPhotoChange(){
-    await renderSettings();
-    if (editLang === currentLang) await load(currentLang);
+    document.getElementById("pm-delete").addEventListener("click", async () => {
+      if (!confirm(`話し相手「${p.name}」を削除しますか？写真もすべて削除されます。`)) return;
+      busy(true); msg("削除中…");
+      try{
+        await callBackend("deletePartner", { id: p.id }, 30000);
+        data.mine = data.mine.filter(x => x.id !== p.id);
+        data.shared = data.shared.filter(x => x.id !== p.id);
+        if (currentId === p.id) select("default");
+        renderPicker();
+      }catch(err){ busy(false); msg(err.message); }
+    });
   }
 
   function onModalClosed(){
-    if (modalAvatar){ modalAvatar.destroy(); modalAvatar = null; }
+    destroyModalAvatar();
+    editId = null;
     synth && synth.cancel();
     load(currentLang);
   }
 
   if (synth && "onvoiceschanged" in synth){
     synth.addEventListener("voiceschanged", () => {
-      if (document.getElementById("pm-voice") && document.getElementById("pm-voice").options.length <= 1) renderSettings();
+      const sel = document.getElementById("pm-voice");
+      if (sel && sel.options.length <= 1 && editId) renderEditor();
     });
   }
 
   return {
-    Avatar, load, name, pickVoice, parseReply, refreshLabels,
+    Avatar, load, refresh, reset, select, name, pickVoice, parseReply, refreshLabels,
     setEmotionAll, startTalkingAll, stopTalkingAll,
-    openSettings, onModalClosed,
+    openPicker, openSettings: openPicker, onModalClosed,
     get lang(){ return currentLang; }
   };
 })();

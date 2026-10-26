@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=2.1.0">
+<link rel="stylesheet" href="style.css?v=2.2.0">
 </head>
 <body>
 
@@ -76,7 +76,7 @@
     <div class="account-area">
       <button class="account-btn" id="account-btn"><span id="account-nickname">-</span> ▾</button>
       <div class="account-menu" id="account-menu" hidden>
-        <button type="button" id="menu-partner-btn">話し相手の設定</button>
+        <button type="button" id="menu-partner-btn">話し相手の切り替え・設定</button>
         <button type="button" id="menu-nickname-btn">ニックネーム変更</button>
         <button type="button" id="menu-version-btn">バージョン情報</button>
         <button type="button" id="menu-password-btn">パスワード変更</button>
@@ -105,9 +105,9 @@
       <div class="partner-card">
         <div class="partner-mini" id="theme-avatar"></div>
         <div class="partner-card-body">
-          <div class="partner-card-label">今日の話し相手</div>
+          <div class="partner-card-label">今日の話し相手 <span class="partner-scope" data-partner-scope></span></div>
           <div class="partner-card-name"><span data-partner-flag></span> <span data-partner-name></span></div>
-          <button type="button" class="chip" id="theme-partner-btn">話し相手を設定</button>
+          <button type="button" class="chip" id="theme-partner-btn">切り替え・設定</button>
         </div>
       </div>
 
@@ -219,7 +219,7 @@
       <div class="partner-stage">
         <div id="normal-avatar"></div>
         <div class="partner-tag"><span data-partner-flag></span> <span data-partner-name></span>
-          <button type="button" class="partner-gear" data-open-partner aria-label="話し相手の設定">⚙</button></div>
+          <button type="button" class="partner-gear" data-open-partner aria-label="話し相手の切り替え">⚙</button></div>
       </div>
       <div class="ai-line" id="normal-ai-line">準備中…</div>
       <div class="mic-indicator" id="normal-mic-indicator">
@@ -242,7 +242,7 @@
       <div class="partner-stage">
         <div id="talk-avatar"></div>
         <div class="partner-tag"><span data-partner-flag></span> <span data-partner-name></span>
-          <button type="button" class="partner-gear" data-open-partner aria-label="話し相手の設定">⚙</button></div>
+          <button type="button" class="partner-gear" data-open-partner aria-label="話し相手の切り替え">⚙</button></div>
       </div>
       <div class="ai-line" id="ai-line">準備中…</div>
       <div class="mic-wrap">
@@ -301,8 +301,8 @@
   <div class="modal-card" id="modal-card"></div>
 </div>
 
-<script src="config.js?v=2.1.0"></script>
-<script src="partner.js?v=2.1.0"></script>
-<script src="script.js?v=2.1.0"></script>
+<script src="config.js?v=2.2.0"></script>
+<script src="partner.js?v=2.2.0"></script>
+<script src="script.js?v=2.2.0"></script>
 </body>
 </html>
