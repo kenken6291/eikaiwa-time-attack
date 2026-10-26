@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Speak in 3 — 英会話タイムアタック</title>
+<title>Speak in 3 — 外国語会話タイムアタック</title>
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -75,6 +75,7 @@
     <div class="account-area">
       <button class="account-btn" id="account-btn"><span id="account-nickname">-</span> ▾</button>
       <div class="account-menu" id="account-menu" hidden>
+        <button type="button" id="menu-partner-btn">話し相手の設定</button>
         <button type="button" id="menu-nickname-btn">ニックネーム変更</button>
         <button type="button" id="menu-password-btn">パスワード変更</button>
         <button type="button" id="menu-logout-btn">ログアウト</button>
@@ -97,7 +98,30 @@
   <section class="view active" id="view-theme">
     <div class="hero">
       <h1>今日は、なにを話す？</h1>
-      <p class="lede">マイクを押して、日本語で自由に3分ほど話してください。話した内容から、AIがテーマを見つけて単語・例文・四択テストを作ります。</p>
+      <p class="lede">マイクを押して、日本語で自由に3分ほど話してください。話した内容から、AIがテーマを見つけて、選んだ言語の単語・例文・四択テストを作ります。</p>
+
+      <div class="partner-card">
+        <div class="partner-mini" id="theme-avatar"></div>
+        <div class="partner-card-body">
+          <div class="partner-card-label">今日の話し相手</div>
+          <div class="partner-card-name"><span data-partner-flag></span> <span data-partner-name></span></div>
+          <button type="button" class="chip" id="theme-partner-btn">話し相手を設定</button>
+        </div>
+      </div>
+
+      <div class="settings-row">
+        <label for="lang-select">練習する言語</label>
+        <select id="lang-select">
+          <option value="en">🇺🇸 英語</option>
+          <option value="es">🇪🇸 スペイン語</option>
+          <option value="zh">🇨🇳 中国語</option>
+          <option value="pt">🇧🇷 ポルトガル語</option>
+          <option value="ko">🇰🇷 韓国語</option>
+          <option value="fr">🇫🇷 フランス語</option>
+          <option value="de">🇩🇪 ドイツ語</option>
+        </select>
+      </div>
+      <p class="lang-note" id="lang-note" hidden></p>
 
       <div class="settings-row">
         <label for="wait-time-select">応答までの待ち時間</label>
@@ -168,7 +192,7 @@
   <!-- STEP 4: 通常会話 -->
   <section class="view" id="view-normal">
     <h2 class="section-title">通常会話 <span class="theme-tag" id="normal-theme-tag"></span></h2>
-    <p class="lede small">時間制限なしで、AIとテーマについて自由に会話してみましょう。設定した時間、会話が続きます。</p>
+    <p class="lede small">時間制限なしで、<span data-partner-name></span>とテーマについて自由に会話してみましょう。設定した時間、会話が続きます。</p>
 
     <div class="settings-row" id="normal-duration-row">
       <label for="normal-duration-select">会話時間</label>
@@ -188,6 +212,11 @@
       </div>
       <div class="bar record-bar"><div class="bar-fill" id="normal-bar-fill"></div></div>
 
+      <div class="partner-stage">
+        <div id="normal-avatar"></div>
+        <div class="partner-tag"><span data-partner-flag></span> <span data-partner-name></span>
+          <button type="button" class="partner-gear" data-open-partner aria-label="話し相手の設定">⚙</button></div>
+      </div>
       <div class="ai-line" id="normal-ai-line">準備中…</div>
       <div class="mic-indicator" id="normal-mic-indicator">
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
@@ -204,8 +233,13 @@
   <!-- STEP 5: 会話タイムアタック -->
   <section class="view" id="view-talk">
     <h2 class="section-title">会話タイムアタック <span class="theme-tag" id="talk-theme-tag"></span></h2>
-    <p class="lede small">AIの発話が終わったら、<strong id="wait-time-label">3秒</strong>以内にマイクへ向かって答えて。</p>
+    <p class="lede small"><span data-partner-name></span>の発話が終わったら、<strong id="wait-time-label">3秒</strong>以内にマイクへ向かって<span data-partner-lang>英語</span>で答えて。</p>
     <div class="talk-stage">
+      <div class="partner-stage">
+        <div id="talk-avatar"></div>
+        <div class="partner-tag"><span data-partner-flag></span> <span data-partner-name></span>
+          <button type="button" class="partner-gear" data-open-partner aria-label="話し相手の設定">⚙</button></div>
+      </div>
       <div class="ai-line" id="ai-line">準備中…</div>
       <div class="mic-wrap">
         <svg class="timer-ring" viewBox="0 0 140 140">
@@ -263,6 +297,8 @@
   <div class="modal-card" id="modal-card"></div>
 </div>
 
-<script src="script.js?v=20260830-1"></script>
+<script src="config.js?v=20261026-3"></script>
+<script src="partner.js?v=20261026-3"></script>
+<script src="script.js?v=20261026-3"></script>
 </body>
 </html>

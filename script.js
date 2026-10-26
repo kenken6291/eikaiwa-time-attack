@@ -1,8 +1,10 @@
 /* ============================================================
-   Speak in 3 — フロントエンド
-   GASウェブアプリのURLをここに設定してください
+   Speak in 3 — フロントエンド（多言語＋話し相手アバター対応）
+   ※ partner.js を先に読み込むこと
+   GASウェブアプリのURLは config.js で設定してください
    ============================================================ */
-const GAS_URL = "https://script.google.com/macros/s/AKfycbwaIg_BJ5AP_rAwYknfQY69pyssjs90YAohZMo8daOjtNQzE1IH6PY-gKGrGYSSS0619Q/exec";
+const GAS_URL = String(window.GAS_URL || "");
+function gasUrlMissing(){ return !GAS_URL || GAS_URL.includes("XXXX"); }
 let RESPONSE_LIMIT_SEC = 3; // タイムアタックの制限時間（秒）— 画面上のセレクトで変更可能
 
 document.getElementById("wait-time-select").addEventListener("change", (e) => {
@@ -15,6 +17,7 @@ document.getElementById("wait-time-select").addEventListener("change", (e) => {
 let auth = { sessionToken: null, nickname: null };
 
 function rawCallBackend(action, payload){
+  if (gasUrlMissing()) return Promise.reject(new Error("config.js の GAS_URL を設定してください"));
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000); // 20秒でタイムアウト
   return fetch(GAS_URL, {
@@ -141,6 +144,7 @@ function completeLogin(sessionToken, nickname){
   document.getElementById("app-screen").hidden = false;
   goToView("theme");
   restoreProgress(); // 進行中のテーマ・単語・四択があれば復元し、どのステップからでも共有されるようにする
+  setLang(state.lang);
 }
 
 function logout(){
@@ -165,6 +169,10 @@ document.getElementById("menu-logout-btn").addEventListener("click", () => {
   document.getElementById("account-menu").hidden = true;
   if (confirm("ログアウトしますか？")) logout();
 });
+document.getElementById("menu-partner-btn").addEventListener("click", () => {
+  document.getElementById("account-menu").hidden = true;
+  Partner.openSettings(state.lang);
+});
 document.getElementById("menu-nickname-btn").addEventListener("click", () => {
   document.getElementById("account-menu").hidden = true;
   openNicknameModal();
@@ -180,8 +188,12 @@ function openModal(html){
   document.getElementById("modal-overlay").hidden = false;
 }
 function closeModal(){
+  const card = document.getElementById("modal-card");
+  const wasPartner = !!document.getElementById("pm-root");
   document.getElementById("modal-overlay").hidden = true;
-  document.getElementById("modal-card").innerHTML = "";
+  card.innerHTML = "";
+  card.classList.remove("wide");
+  if (wasPartner) Partner.onModalClosed();
 }
 document.getElementById("modal-overlay").addEventListener("click", (e) => {
   if (e.target.id === "modal-overlay") closeModal();
@@ -261,6 +273,8 @@ function openPasswordModal(){
   });
 }
 
+if (gasUrlMissing()) showAuthMsg("login-msg", "config.js の GAS_URL を設定してください");
+
 /* --- 保存済みセッションの復元 --- */
 (async function restoreSession(){
   const saved = localStorage.getItem("speakin3_session");
@@ -274,7 +288,10 @@ function openPasswordModal(){
   }
 })();
 
+const LANG_KEY = "speakin3_lang";
 let state = {
+  lang: (() => { try{ return localStorage.getItem(LANG_KEY) || "en"; }catch(e){ return "en"; } })(), // 練習する言語（会話・読み上げ・音声認識）
+  materialLang: "",    // 単語・例文・四択を作ったときの言語
   theme: "",
   transcriptSummary: "", // 音声フリートークを整理した文章（テキスト入力テーマの場合は空）
   words: [],
@@ -284,6 +301,40 @@ let state = {
   talkHistory: [], // { role: 'ai'|'you', text: string, timedOut?: bool }
   sessionId: null
 };
+
+/* ============================================================
+   言語の切り替え ＆ 話し相手アバター
+   ============================================================ */
+const langSelect = document.getElementById("lang-select");
+const avatarTheme = new Partner.Avatar(document.getElementById("theme-avatar"));
+const avatarNormal = new Partner.Avatar(document.getElementById("normal-avatar"));
+const avatarTalk = new Partner.Avatar(document.getElementById("talk-avatar"));
+
+langSelect.addEventListener("change", e => setLang(e.target.value));
+
+function setLang(code){
+  if (!LANGS[code]) code = "en";
+  state.lang = code;
+  langSelect.value = code;
+  try{ localStorage.setItem(LANG_KEY, code); }catch(e){}
+  Partner.load(code);
+  updateLangNote();
+}
+function L(){ return getLang(state.lang); }
+function partnerName(){ return Partner.name(state.lang); }
+
+function updateLangNote(){
+  const note = document.getElementById("lang-note");
+  if (state.words.length && state.materialLang && state.materialLang !== state.lang){
+    note.textContent = `※ いまの単語・例文は${getLang(state.materialLang).label}で作られています。${L().label}の教材にするには、もう一度テーマを話すか入力してください（会話は${L().label}で行います）。`;
+    note.hidden = false;
+  } else {
+    note.hidden = true;
+  }
+}
+
+document.getElementById("theme-partner-btn").addEventListener("click", () => Partner.openSettings(state.lang));
+document.querySelectorAll("[data-open-partner]").forEach(b => b.addEventListener("click", () => Partner.openSettings(state.lang)));
 
 /* ---------- 画面遷移 ---------- */
 const STEP_ORDER = ["theme","study","quiz","normal","talk","review"];
@@ -316,6 +367,7 @@ function stopActiveStepProcesses(){
   if (themeRecognizer){ try{ themeRecognizer.stop(); }catch(e){} }
   if (normalRecognizer){ try{ normalRecognizer.stop(); }catch(e){} }
   synth && synth.cancel();
+  Partner.stopTalkingAll();
 }
 
 /* ---------- ステッパー（テーマ/単語・例文/四択テスト/会話/ふりかえり）を直接クリックで移動 ---------- */
@@ -397,6 +449,7 @@ function skipQuestion(){
   clearInterval(countdownTimer);
   if (recognizer){ try{ recognizer.stop(); }catch(e){} }
   document.getElementById("you-line").textContent = "（スキップ）";
+  Partner.setEmotionAll("neutral");
   addLogRow("timeout", "この質問をスキップしました");
   state.talkHistory.push({ role: "you", text: "(skipped by user)", skipped: true });
   continueConversation();
@@ -418,7 +471,7 @@ function rebuildTalkLog(){
   log.innerHTML = "";
   state.talkHistory.forEach(h => {
     if (h.role === "ai") addLogRow("ai", h.text);
-    else if (h.timedOut) addLogRow("timeout", "3秒以内に応答できませんでした");
+    else if (h.timedOut) addLogRow("timeout", `${RESPONSE_LIMIT_SEC}秒以内に応答できませんでした`);
     else if (h.skipped) addLogRow("timeout", "この質問をスキップしました");
     else addLogRow("you", h.text);
   });
@@ -426,6 +479,7 @@ function rebuildTalkLog(){
 
 /* ---------- GAS呼び出し（text/plainでPOSTしCORSを回避）---------- */
 async function callBackend(action, payload, timeoutMs = 12000){
+  if (gasUrlMissing()) throw new Error("config.js の GAS_URL を設定してください");
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   let res;
@@ -552,7 +606,10 @@ async function startThemeFromTranscript(transcript){
   goToView("study");
 
   try{
-    const data = await callBackend("generateStudySetFromTranscript", { transcript }, 40000);
+    const lang = state.lang;
+    const data = await callBackend("generateStudySetFromTranscript",
+      { transcript, lang, langName: getLang(lang).label }, 40000);
+    state.materialLang = lang;
     state.theme = data.theme || "フリートーク";
     state.transcriptSummary = data.transcript_summary || "";
     state.words = data.words || [];
@@ -583,7 +640,10 @@ async function startTheme(theme){
   goToView("study");
 
   try{
-    const data = await callBackend("generateStudySet", { theme }, 40000);
+    const lang = state.lang;
+    const data = await callBackend("generateStudySet",
+      { theme, lang, langName: getLang(lang).label }, 40000);
+    state.materialLang = lang;
     state.words = data.words || [];
     state.quiz = data.quiz || [];
     renderWordGrid();
@@ -610,6 +670,8 @@ function renderTranscriptSummary(){
 function persistProgress(){
   try{
     localStorage.setItem("speakin3_progress", JSON.stringify({
+      lang: state.lang,
+      materialLang: state.materialLang,
       theme: state.theme,
       transcriptSummary: state.transcriptSummary,
       words: state.words,
@@ -625,6 +687,8 @@ function restoreProgress(){
     const saved = JSON.parse(raw);
     if (saved && saved.theme && !state.theme){
       state.theme = saved.theme;
+      state.lang = saved.lang || state.lang;
+      state.materialLang = saved.materialLang || saved.lang || "en";
       state.transcriptSummary = saved.transcriptSummary || "";
       state.words = saved.words || [];
       state.quiz = saved.quiz || [];
@@ -642,8 +706,9 @@ function clearProgress(){
 
 function renderWordGrid(){
   const grid = document.getElementById("word-grid");
-  grid.innerHTML = state.words.map(w => `
+  grid.innerHTML = state.words.map((w, i) => `
     <div class="word-card">
+      <button type="button" class="say-btn" data-say="${i}" aria-label="読み上げ">🔊</button>
       <div class="en">${escapeHtml(w.en)}</div>
       <div class="ja">${escapeHtml(w.ja)}</div>
       <div class="ex">${escapeHtml(w.example_en)}</div>
@@ -651,6 +716,11 @@ function renderWordGrid(){
     </div>
   `).join("");
   document.getElementById("to-quiz-btn").hidden = state.words.length === 0;
+  grid.querySelectorAll("[data-say]").forEach(btn => btn.addEventListener("click", () => {
+    const w = state.words[Number(btn.dataset.say)];
+    if (w) speak(`${w.en}. ${w.example_en || ""}`, { lang: state.materialLang || state.lang });
+  }));
+  updateLangNote();
 }
 document.getElementById("to-quiz-btn").addEventListener("click", () => {
   goToView("quiz");
@@ -733,6 +803,7 @@ document.getElementById("normal-start-btn").addEventListener("click", () => {
   document.getElementById("restart-normal-btn").hidden = true;
   document.getElementById("normal-stage").hidden = false;
 
+  Partner.setEmotionAll("joy");
   normalStart = performance.now();
   normalTimerInterval = setInterval(updateNormalTimer, 250);
   startNormalConversation();
@@ -755,11 +826,10 @@ function updateNormalTimer(){
 async function startNormalConversation(){
   document.getElementById("normal-ai-line").textContent = "準備中…";
   try{
-    const data = await callBackendWithRetry("normalChatReply",
-      { theme: state.theme, history: [], context: state.transcriptSummary }, 0);
+    const data = await callBackendWithRetry("normalChatReply", chatPayload([]), 0);
     await pushNormalAiLine(data.reply);
   }catch(err){
-    await pushNormalAiLine(`Let's have a relaxed conversation about ${state.theme}. Tell me anything about it.`);
+    await pushNormalAiLine(L().normalStart(state.theme));
   }
 }
 
@@ -767,12 +837,14 @@ function addNormalLogRow(role, text){
   const log = document.getElementById("normal-log");
   const row = document.createElement("div");
   row.className = "row " + role;
-  row.textContent = (role === "ai" ? "AI: " : "あなた: ") + text;
+  row.textContent = (role === "ai" ? partnerName() + ": " : "あなた: ") + text;
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
 }
 
-async function pushNormalAiLine(text){
+async function pushNormalAiLine(raw){
+  const { text, emotion } = Partner.parseReply(raw);
+  Partner.setEmotionAll(emotion);
   document.getElementById("normal-ai-line").textContent = text;
   normalHistory.push({ role: "ai", text });
   addNormalLogRow("ai", text);
@@ -811,7 +883,7 @@ function beginNormalListen(){
 
   function createRecognizer(){
     const r = new SpeechRecognition();
-    r.lang = "en-US";
+    r.lang = L().speech;
     r.interimResults = true;
     r.continuous = true; // 話し始めてすぐ打ち切られないよう、区切らずに聞き続ける
     r.maxAlternatives = 1;
@@ -870,11 +942,10 @@ function beginNormalListen(){
 async function continueNormalConversation(){
   if (normalTimeUp){ endNormalConversation(); return; }
   try{
-    const data = await callBackendWithRetry("normalChatReply",
-      { theme: state.theme, history: normalHistory, context: state.transcriptSummary }, 1);
+    const data = await callBackendWithRetry("normalChatReply", chatPayload(normalHistory), 1);
     await pushNormalAiLine(data.reply);
   }catch(err){
-    await pushNormalAiLine("Sorry, could you say that again?");
+    await pushNormalAiLine(L().again);
   }
 }
 
@@ -888,6 +959,8 @@ function endNormalConversation(){
   if (normalRecognizer){ try{ normalRecognizer.stop(); }catch(e){} }
   synth && synth.cancel();
   document.getElementById("normal-mic-indicator").classList.remove("listening");
+  Partner.stopTalkingAll();
+  Partner.setEmotionAll("joy");
   document.getElementById("normal-ai-line").textContent = "お疲れさま！通常会話はここで終了です。";
   document.getElementById("to-talk-from-normal-btn").hidden = false;
   document.getElementById("restart-normal-btn").hidden = false;
@@ -917,16 +990,47 @@ let countdownTimer = null;
 let countdownStart = 0;
 const RING_CIRC = 389.6;
 
-function speak(text){
+/** 選んだ言語の声で読み上げ、そのあいだ話し相手の口を動かす */
+function speak(text, opts = {}){
   return new Promise(resolve => {
     if (!synth){ resolve(); return; }
     synth.cancel();
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = "en-US";
-    utter.onend = resolve;
-    utter.onerror = resolve;
+    const lang = opts.lang || state.lang;
+    const clean = String(text || "").replace(/[*_#`]/g, "").trim();
+    if (!clean){ resolve(); return; }
+    const utter = new SpeechSynthesisUtterance(clean);
+    utter.lang = getLang(lang).speech;
+    const voice = Partner.pickVoice(lang);
+    if (voice) utter.voice = voice;
+
+    let done = false;
+    const perChar = /^(zh|ko)$/.test(lang) ? 380 : 160;
+    const safety = setTimeout(() => finish(), 5000 + clean.length * perChar); // onendが来ない端末への保険
+    function finish(){
+      if (done) return;
+      done = true;
+      clearTimeout(safety);
+      Partner.stopTalkingAll();
+      resolve();
+    }
+    utter.onstart = () => Partner.startTalkingAll();
+    utter.onend = finish;
+    utter.onerror = finish;
+    Partner.startTalkingAll();
     synth.speak(utter);
   });
+}
+
+/** 会話APIへ送る内容（言語と話し相手の名前も渡し、GAS側で言語・表情を決める） */
+function chatPayload(history){
+  return {
+    theme: state.theme,
+    history,
+    context: state.transcriptSummary || "",
+    lang: state.lang,
+    langName: L().label,
+    partnerName: partnerName()
+  };
 }
 
 /** TTS終了直後は端末のスピーカー音がマイクに残っていることがあるため、少し待ってから聞き取りを始める */
@@ -958,7 +1062,7 @@ function settleAfterSpeak(){
  * ハウリング対策：スピーカー音声が別の音声認識に混入するのを防ぐ。
  */
 function isLikelyEcho(userText, aiText){
-  const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+  const norm = s => String(s || "").toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
   const u = norm(userText);
   const a = norm(aiText);
   if (!u) return true; // 空はエコー扱いで無視
@@ -973,16 +1077,18 @@ async function startConversation(){
   document.getElementById("talk-log").innerHTML = "";
   document.getElementById("you-line").textContent = "\u00A0";
   document.getElementById("ai-line").textContent = "準備中…";
+  Partner.setEmotionAll("joy");
   try{
-    const data = await callBackendWithRetry("chatReply",
-      { theme: state.theme, history: [], context: state.transcriptSummary }, 0);
+    const data = await callBackendWithRetry("chatReply", chatPayload([]), 0);
     await pushAiLine(data.reply);
   }catch(err){
-    await pushAiLine(`Let's talk about ${state.theme}. Are you ready?`);
+    await pushAiLine(L().start(state.theme));
   }
 }
 
-async function pushAiLine(text){
+async function pushAiLine(raw){
+  const { text, emotion } = Partner.parseReply(raw);
+  Partner.setEmotionAll(emotion);
   document.getElementById("ai-line").textContent = text;
   state.talkHistory.push({ role: "ai", text });
   addLogRow("ai", text);
@@ -995,7 +1101,7 @@ function addLogRow(role, text){
   const log = document.getElementById("talk-log");
   const row = document.createElement("div");
   row.className = "row " + role;
-  row.textContent = (role === "ai" ? "AI: " : role === "you" ? "あなた: " : "⏱ タイムオーバー: ") + text;
+  row.textContent = (role === "ai" ? partnerName() + ": " : role === "you" ? "あなた: " : "⏱ タイムオーバー: ") + text;
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
 }
@@ -1033,7 +1139,7 @@ function beginListenWindow(){
 
   function createRecognizer(){
     const r = new SpeechRecognition();
-    r.lang = "en-US";
+    r.lang = L().speech;
     r.interimResults = true;
     r.continuous = true; // 話し始めてすぐ打ち切られないよう、区切らずに聞き続ける
     r.maxAlternatives = 1;
@@ -1123,7 +1229,8 @@ function beginListenWindow(){
 
 function onTimeout(){
   document.getElementById("you-line").textContent = "（時間切れ）";
-  addLogRow("timeout", "3秒以内に応答できませんでした");
+  Partner.setEmotionAll("sad"); // 返事がなくて困った顔
+  addLogRow("timeout", `${RESPONSE_LIMIT_SEC}秒以内に応答できませんでした`);
   state.talkHistory.push({ role: "you", text: "(no response — timed out)", timedOut: true });
   continueConversation();
 }
@@ -1131,19 +1238,15 @@ function onTimeout(){
 async function continueConversation(){
   if (state.talkHistory.filter(h => h.role === "ai").length >= 6){
     // 6往復ほどで自然に会話を終える
-    await pushAiLineNoListen("Great talking with you! Let's wrap up here.");
+    await pushAiLineNoListen(L().wrap);
     return;
   }
   try{
-    const data = await callBackendWithRetry("chatReply", {
-      theme: state.theme,
-      history: state.talkHistory,
-      context: state.transcriptSummary
-    }, 1);
+    const data = await callBackendWithRetry("chatReply", chatPayload(state.talkHistory), 1);
     await pushAiLine(data.reply);
   }catch(err){
     // Geminiが一時的に混雑していても会話を止めない
-    await pushAiLine("Sorry, could you say that again?");
+    await pushAiLine(L().again);
   }
 }
 
@@ -1158,7 +1261,9 @@ async function callBackendWithRetry(action, payload, retries){
     throw err;
   }
 }
-async function pushAiLineNoListen(text){
+async function pushAiLineNoListen(raw){
+  const { text, emotion } = Partner.parseReply(raw);
+  Partner.setEmotionAll(emotion);
   document.getElementById("ai-line").textContent = text;
   state.talkHistory.push({ role: "ai", text });
   addLogRow("ai", text);
@@ -1182,6 +1287,8 @@ async function runEvaluation(){
   try{
     const data = await callBackend("evaluateConversation", {
       theme: state.theme,
+      lang: state.lang,
+      langName: L().label,
       history: state.talkHistory,
       quizScore: state.quizScore,
       quizTotal: state.quiz.length
@@ -1190,7 +1297,8 @@ async function runEvaluation(){
 
     // ログをスプレッドシート＋Driveに保存（単語・四択・整理済みの話した内容も含めて後で再利用できるようにする）
     callBackend("saveLog", {
-      theme: state.theme,
+      theme: themeWithLang(state.theme, state.lang),
+      lang: state.lang,
       transcriptSummary: state.transcriptSummary,
       words: state.words,
       quiz: state.quiz,
@@ -1229,6 +1337,7 @@ function renderReview(data){
 document.getElementById("restart-btn").addEventListener("click", () => {
   document.getElementById("theme-input").value = "";
   state.theme = "";
+  state.materialLang = "";
   state.transcriptSummary = "";
   state.words = [];
   state.quiz = [];
@@ -1268,21 +1377,23 @@ function renderPastList(sessions){
     listEl.innerHTML = `<p class="past-empty">まだ記録がありません。</p>`;
     return;
   }
-  listEl.innerHTML = sessions.map(s => `
+  listEl.innerHTML = sessions.map(s => {
+    const lt = splitLangTheme(s.theme);
+    return `
     <div class="past-item">
       <div class="past-item-head">
         <span class="past-date">${escapeHtml(s.date)}</span>
         <span class="past-score">${s.score !== "" && s.score != null ? s.score + "点" : "-"}</span>
       </div>
-      <div class="past-theme">${escapeHtml(s.theme)}</div>
+      <div class="past-theme">${getLang(lt.lang).flag} ${escapeHtml(lt.theme)}</div>
       <div class="past-actions">
         <button class="chip" data-action="reuse" data-index="${s.index}">もう一度話す</button>
         <button class="chip" data-action="view" data-index="${s.index}">評価を見る</button>
         <button class="chip" data-action="edit" data-index="${s.index}" data-theme="${escapeHtml(s.theme)}">編集</button>
         <button class="chip" data-action="delete" data-index="${s.index}">削除</button>
       </div>
-    </div>
-  `).join("");
+    </div>`;
+  }).join("");
   listEl.querySelectorAll(".chip[data-action]").forEach(btn => {
     btn.addEventListener("click", () => {
       const action = btn.dataset.action;
@@ -1294,7 +1405,9 @@ function renderPastList(sessions){
   });
 }
 
-function openEditThemeModal(index, currentTheme){
+function openEditThemeModal(index, rawTheme){
+  const lt = splitLangTheme(rawTheme);
+  const currentTheme = lt.theme;
   openModal(`
     <h3>テーマを編集</h3>
     <div class="field">
@@ -1311,7 +1424,7 @@ function openEditThemeModal(index, currentTheme){
     const newTheme = document.getElementById("modal-theme-edit").value.trim();
     if (!newTheme){ showAuthMsg("modal-msg", "テーマを入力してください"); return; }
     try{
-      await callBackend("updateSessionTheme", { index, newTheme });
+      await callBackend("updateSessionTheme", { index, newTheme: themeWithLang(newTheme, lt.lang) });
       closeModal();
       refreshPastList();
     }catch(err){
@@ -1336,7 +1449,10 @@ async function handlePastAction(action, rowIndex){
     const s = data.session;
     if (!s) throw new Error("記録の詳細データが見つかりませんでした");
 
-    state.theme = s.theme || "";
+    const lt = splitLangTheme(s.theme);
+    state.theme = lt.theme || "";
+    state.materialLang = lt.lang;
+    setLang(lt.lang);
     state.transcriptSummary = s.transcriptSummary || "";
     state.words = s.words || [];
     state.quiz = s.quiz || [];
