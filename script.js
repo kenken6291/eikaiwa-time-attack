@@ -4,7 +4,9 @@
    GASウェブアプリのURLは config.js で設定してください
    ============================================================ */
 /** フロントエンドのバージョン — ファイルを更新したらここも更新する */
-const APP_VERSION = "2.2.0";
+const APP_VERSION = "2.3.0";
+/** この画面が必要とするサーバー（GAS）の最低バージョン。これより古いときだけ警告する */
+const REQUIRED_SERVER_VERSION = "2.2.0";
 const APP_UPDATED = "2026-10-26";
 
 const GAS_URL = String(window.GAS_URL || "");
@@ -150,6 +152,10 @@ function completeLogin(sessionToken, nickname){
   restoreProgress(); // 進行中のテーマ・単語・四択があれば復元し、どのステップからでも共有されるようにする
   setLang(state.lang);
   Partner.refresh().then(() => Partner.load(state.lang)).catch(() => {}); // マイ／みんなの話し相手を読み込む
+  // 初めてログインした端末では、使い方を自動で表示する
+  let seen = null;
+  try{ seen = localStorage.getItem(HELP_SEEN_KEY); }catch(e){}
+  if (!seen) setTimeout(openHelp, 400);
 }
 
 function logout(){
@@ -286,6 +292,19 @@ if (gasUrlMissing()) showAuthMsg("login-msg", "config.js の GAS_URL を設定�
    ============================================================ */
 let serverVersion = null; // { version, updated, model } / 取得失敗時は { error }
 
+/** "2.10.0" と "2.9.1" のようなバージョン番号を比べる（a<b なら負） */
+function compareVersion(a, b){
+  const pa = String(a || "0").split(".").map(Number), pb = String(b || "0").split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++){
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+}
+function serverTooOld(){
+  return !!(serverVersion && !serverVersion.error && compareVersion(serverVersion.version, REQUIRED_SERVER_VERSION) < 0);
+}
+
 function versionText(){
   const app = `画面 v${APP_VERSION}（${APP_UPDATED}）`;
   let srv = "サーバー 確認中…";
@@ -297,9 +316,9 @@ function versionText(){
 function renderVersion(){
   document.querySelectorAll("[data-version]").forEach(el => {
     el.textContent = versionText();
-    const mismatch = serverVersion && !serverVersion.error && serverVersion.version !== APP_VERSION;
+    const mismatch = serverTooOld();
     el.classList.toggle("warn", !!(mismatch || (serverVersion && serverVersion.error)));
-    el.title = mismatch ? "画面とサーバーのバージョンが違います。GASを新バージョンでデプロイしたか確認してください。" : "";
+    el.title = mismatch ? `サーバーが古いです（v${REQUIRED_SERVER_VERSION}以上が必要）。GASを新バージョンでデプロイしてください。` : "";
   });
 }
 async function loadServerVersion(){
@@ -315,7 +334,7 @@ async function loadServerVersion(){
 }
 function openVersionModal(){
   const s = serverVersion || {};
-  const mismatch = s.version && s.version !== APP_VERSION;
+  const mismatch = serverTooOld();
   openModal(`
     <h3>バージョン情報</h3>
     <table class="version-table">
@@ -325,11 +344,112 @@ function openVersionModal(){
       ${s.model ? `<tr><th>AIモデル</th><td>${escapeHtml(s.model)}</td></tr>` : ""}
       <tr><th>対応言語</th><td>${LANG_ORDER.map(c => LANGS[c].flag + " " + LANGS[c].label).join("、")}</td></tr>
     </table>
-    ${mismatch ? `<p class="auth-msg">画面とサーバーのバージョンが違います。GASを「新バージョン」でデプロイしたか確認してください。</p>` : ""}
+    ${mismatch ? `<p class="auth-msg">サーバーが古いです（v${escapeHtml(REQUIRED_SERVER_VERSION)}以上が必要）。GASを「新バージョン」でデプロイしたか確認してください。</p>` : ""}
     <div class="modal-actions"><button class="btn-primary" id="modal-cancel">閉じる</button></div>
   `);
   document.getElementById("modal-cancel").addEventListener("click", closeModal);
 }
+/* ============================================================
+   使い方
+   ============================================================ */
+const HELP_SEEN_KEY = "speakin3_help_seen";
+
+function helpHTML(){
+  return `
+    <h3>使い方</h3>
+    <p class="help-lead">Speak in 3 は、日本語で話した話題から外国語の教材を作り、写真の話し相手と会話して練習するアプリです。上から順に進めれば大丈夫です。</p>
+
+    <details class="help-sec" open>
+      <summary>① 練習の流れ（6ステップ）</summary>
+      <ol class="help-steps">
+        <li><b>テーマ</b>：「練習する言語」を選び、マイクを押して日本語で自由に話します（最大3分）。もう一度押すと終了。「この内容でAIに教材を作らせる」を押します。話すのが苦手なら、下の欄にテーマ（例：カフェでの注文）を入力してもOKです。</li>
+        <li><b>単語・例文</b>：AIが選んだ言語の単語6個と例文を作ります。🔊で発音を聞けます。</li>
+        <li><b>四択テスト</b>：5問のクイズで単語を確認します。</li>
+        <li><b>通常会話</b>：会話時間（1〜10分）を選び、話し相手とのんびり会話します。話し相手が話し終わったら、マイクに向かって答えてください。少し黙ると「話し終わった」と判断されます。</li>
+        <li><b>タイムアタック会話</b>：話し相手の質問に、決めた秒数（標準3秒）以内に答え始める練習です。間に合わないと話し相手が困り顔になり、やさしく言い直してくれます。下のボタンで「前へ戻る（同じ質問をもう一度）」「次へ進む（スキップ）」「最初から」ができます。</li>
+        <li><b>ふりかえり</b>：AIが点数・文法・より自然な言い方・まとめを日本語で教えてくれます。記録は自動で保存されます。</li>
+      </ol>
+      <p class="help-tip">上の「テーマ／単語・例文／…」のボタンを押すと、好きなステップへ移動できます。</p>
+    </details>
+
+    <details class="help-sec">
+      <summary>② 言語の選び方</summary>
+      <p>テーマ画面の「練習する言語」で、${LANG_ORDER.map(c => LANGS[c].flag + LANGS[c].label).join("・")}から選べます。教材を作ったあとに言語を変えると、会話は新しい言語になりますが、単語・例文は前の言語のままです。新しい言語の教材にしたいときは、テーマをもう一度話すか入力してください。</p>
+      <p>「応答までの待ち時間」で、タイムアタックの制限時間（1〜8秒）を変えられます。慣れないうちは5秒や8秒がおすすめです。</p>
+    </details>
+
+    <details class="help-sec">
+      <summary>③ 話し相手を切り替える</summary>
+      <p>テーマ画面の「切り替え・設定」、会話画面の⚙、または右上のメニュー「話し相手の切り替え・設定」を押すと、話し相手を選べます。</p>
+      <ul>
+        <li><b>標準</b>：イラストの話し相手です。言語ごとに名前と色が変わります。</li>
+        <li><b>マイ話し相手</b>：あなただけが使える話し相手を10人まで登録できます。どの端末からログインしても使えます。</li>
+        <li><b>みんなの話し相手</b>：管理者が用意した、全員が使える話し相手（10人まで）です。</li>
+      </ul>
+      <p>使いたい話し相手の写真をタップすると切り替わります（✓が付きます）。</p>
+    </details>
+
+    <details class="help-sec">
+      <summary>④ 話し相手を作る（写真の登録）</summary>
+      <ol class="help-steps">
+        <li>「マイ話し相手」で「＋新しく追加」を押します。</li>
+        <li>名前を入力します（会話の中でもこの名前を名乗ります）。</li>
+        <li>写真の枠（＋）を押して写真を選びます。表情は「普通・笑顔・困り顔・驚き」、それぞれに「顔・瞬き・しゃべり」の3枚、合計12枚まで登録できます。</li>
+        <li>「この話し相手を使う」を押せば完了です。「試しに話す」で動きを確認できます。</li>
+      </ol>
+      <ul>
+        <li><b>顔</b>＝目を開けて口を閉じた写真、<b>瞬き</b>＝目を閉じた写真、<b>しゃべり</b>＝口を開けた写真です。</li>
+        <li>最低限「普通」の「顔」が1枚あれば動きます。足りない表情は「普通」の写真で代用します。</li>
+        <li>写真は正方形に切り抜かれます。スマホを固定して、同じ位置・同じ明るさで続けて撮ると、切り替えが自然になります。</li>
+        <li>「まとめて選ぶ」では、ファイル名で自動的に振り分けます（例：neutral.jpg／neutral_blink.jpg／joy_talk.jpg／困り顔_瞬き.jpg）。</li>
+        <li>人物の写真は、本人の了解を得たものを使ってください。</li>
+      </ul>
+    </details>
+
+    <details class="help-sec">
+      <summary>⑤ 声の設定</summary>
+      <p>話し相手の編集画面の「声」で、いま練習している言語の声を選べます（話し相手ごと・言語ごと・端末ごとに覚えます）。</p>
+      <p>「声が見つかりません」と出たときは、端末にその言語の読み上げ音声がありません。</p>
+      <ul>
+        <li><b>Android</b>：設定 →（システム →）言語と入力 → テキスト読み上げ → Google音声サービスの設定で、言語の音声データをインストール</li>
+        <li><b>iPhone</b>：設定 → アクセシビリティ → 読み上げコンテンツ → 声 から言語を追加</li>
+        <li><b>Windows</b>：設定 → 時刻と言語 → 音声認識（または言語）で、その言語の音声を追加</li>
+      </ul>
+    </details>
+
+    <details class="help-sec">
+      <summary>⑥ 過去の記録</summary>
+      <p>テーマ画面の「過去の記録から選ぶ」で、これまでの練習（国旗で言語がわかります）を見られます。「もう一度話す」で同じ単語・例文から練習し直し、「評価を見る」でふりかえりを表示、「編集」でテーマ名の変更、「削除」で記録の削除ができます。記録はあなたにだけ表示されます。</p>
+    </details>
+
+    <details class="help-sec">
+      <summary>⑦ うまくいかないとき</summary>
+      <ul>
+        <li><b>マイクが反応しない</b>：ブラウザのマイク許可を確認してください。音声認識は Chrome（Android・パソコン）や Safari（iPhone）で使えます。</li>
+        <li><b>自分の声ではなく話し相手の声を拾ってしまう</b>：イヤホンを使うと安定します。</li>
+        <li><b>写真が表示されない</b>：通信が遅いと時間がかかります。少し待つか、話し相手を選び直してください。</li>
+        <li><b>「タイムアウト」「混雑」と出る</b>：AIが混み合っています。少し待ってからもう一度お試しください。</li>
+        <li><b>画面下のバージョン表示が赤い</b>：サーバー側が古い可能性があります。管理者にお知らせください。</li>
+      </ul>
+    </details>
+
+    <div class="modal-actions"><button class="btn-primary" id="help-close">閉じる</button></div>
+  `;
+}
+
+function openHelp(){
+  openModal(helpHTML());
+  document.getElementById("modal-card").classList.add("wide");
+  document.getElementById("help-close").addEventListener("click", closeModal);
+  try{ localStorage.setItem(HELP_SEEN_KEY, "1"); }catch(e){}
+}
+
+document.getElementById("menu-help-btn").addEventListener("click", () => {
+  document.getElementById("account-menu").hidden = true;
+  openHelp();
+});
+document.querySelectorAll("[data-open-help]").forEach(b => b.addEventListener("click", openHelp));
+
 document.getElementById("menu-version-btn").addEventListener("click", () => {
   document.getElementById("account-menu").hidden = true;
   openVersionModal();

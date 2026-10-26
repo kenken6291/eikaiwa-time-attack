@@ -521,3 +521,26 @@ main{max-width:640px; margin:0 auto; padding:22px 18px 100px;}
 }
 .pm-use{margin:0; padding:10px 12px; font-size:13px;}
 #pm-msg.ok{color:var(--mint);}
+
+/* 使い方 */
+.help-link{
+  display:block; margin:16px auto 0; border:none; background:none; cursor:pointer;
+  font-family:var(--font-body); font-size:13px; font-weight:600; color:var(--navy); text-decoration:underline;
+}
+.hero{position:relative;}
+.help-chip{
+  float:right; margin:0 0 6px 8px; font-family:var(--font-body); font-size:12.5px; font-weight:600;
+  background:var(--card); border:1px solid var(--line); border-radius:999px; padding:6px 12px;
+  cursor:pointer; color:var(--navy);
+}
+.help-lead{font-size:13.5px; line-height:1.7; margin:0 0 12px;}
+.help-sec{border:1px solid var(--line); border-radius:12px; margin-bottom:8px; background:var(--card);}
+.help-sec summary{
+  cursor:pointer; padding:12px 14px; font-family:var(--font-display); font-weight:700; font-size:14px;
+  color:var(--navy); list-style-position:inside;
+}
+.help-sec[open] summary{border-bottom:1px solid var(--line);}
+.help-sec > p, .help-sec > ul, .help-sec > ol{font-size:13.5px; line-height:1.75; margin:10px 14px;}
+.help-sec ul, .help-sec ol{padding-left:20px;}
+.help-steps li{margin-bottom:6px;}
+.help-tip{font-size:12.5px !important; color:var(--muted);}

@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=2.2.0">
+<link rel="stylesheet" href="style.css?v=2.3.0">
 </head>
 <body>
 
@@ -63,6 +63,7 @@
       <button type="submit" class="btn-primary">パスワードを設定する</button>
       <p class="auth-msg" id="forced-pw-msg"></p>
     </form>
+    <button type="button" class="help-link" data-open-help>❓ Speak in 3 の使い方</button>
     <p class="version-line" data-version></p>
   </div>
 </div>
@@ -78,6 +79,7 @@
       <div class="account-menu" id="account-menu" hidden>
         <button type="button" id="menu-partner-btn">話し相手の切り替え・設定</button>
         <button type="button" id="menu-nickname-btn">ニックネーム変更</button>
+        <button type="button" id="menu-help-btn">使い方</button>
         <button type="button" id="menu-version-btn">バージョン情報</button>
         <button type="button" id="menu-password-btn">パスワード変更</button>
         <button type="button" id="menu-logout-btn">ログアウト</button>
@@ -99,6 +101,7 @@
   <!-- STEP 1: 音声でフリートーク→テーマ抽出 -->
   <section class="view active" id="view-theme">
     <div class="hero">
+      <button type="button" class="help-chip" data-open-help>❓ 使い方</button>
       <h1>今日は、なにを話す？</h1>
       <p class="lede">マイクを押して、日本語で自由に3分ほど話してください。話した内容から、AIがテーマを見つけて、選んだ言語の単語・例文・四択テストを作ります。</p>
 
@@ -301,8 +304,8 @@
   <div class="modal-card" id="modal-card"></div>
 </div>
 
-<script src="config.js?v=2.2.0"></script>
-<script src="partner.js?v=2.2.0"></script>
-<script src="script.js?v=2.2.0"></script>
+<script src="config.js?v=2.3.0"></script>
+<script src="partner.js?v=2.3.0"></script>
+<script src="script.js?v=2.3.0"></script>
 </body>
 </html>
