@@ -17,6 +17,10 @@
  * 5. 初回実行時にGmail送信の承認ダイアログが出るので許可すること
  */
 
+/** サーバー（GAS）のバージョン — コードを変更したらここも更新する */
+const GAS_VERSION = "2.1.0";
+const GAS_UPDATED = "2026-10-26";
+
 const PROPS = PropertiesService.getScriptProperties();
 const GEMINI_MODEL = "gemini-3.6-flash";
 const SESSION_TTL_SEC = 6 * 60 * 60; // セッション有効期限 6時間
@@ -74,6 +78,11 @@ function doPost(e) {
   try {
     const req = JSON.parse(e.postData.contents);
     switch (req.action) {
+      // --- バージョン情報（ログイン不要） ---
+      case "getVersion":
+        result = { version: GAS_VERSION, updated: GAS_UPDATED, model: GEMINI_MODEL };
+        break;
+
       // --- 会員認証（ログイン不要） ---
       case "register":
         result = registerMember(req.nickname, req.email);

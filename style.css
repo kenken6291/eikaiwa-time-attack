@@ -363,3 +363,127 @@ main{max-width:640px; margin:0 auto; padding:22px 18px 100px;}
 .review-block h3{font-family:var(--font-display); font-size:14px; margin:0 0 6px; color:var(--navy);}
 .review-block p, .review-block li{font-size:14px; line-height:1.6; color:var(--ink);}
 .review-block ul{margin:0; padding-left:18px;}
+
+/* ============================================================
+   多言語＋話し相手アバター
+   ============================================================ */
+.lang-note{font-size:12.5px; color:var(--coral); background:rgba(255,107,91,0.08); border-radius:10px; padding:9px 12px; margin:-6px 0 14px; line-height:1.6;}
+
+/* テーマ画面の「今日の話し相手」 */
+.partner-card{
+  display:flex; align-items:center; gap:14px; background:var(--card); border:1px solid var(--line);
+  border-radius:16px; padding:12px 14px; margin-bottom:14px;
+}
+.partner-card .partner-avatar{width:84px; border-radius:16px; margin:0; flex:none; box-shadow:none;}
+.partner-card-body{display:flex; flex-direction:column; align-items:flex-start; gap:4px;}
+.partner-card-label{font-size:11.5px; color:var(--muted);}
+.partner-card-name{font-family:var(--font-display); font-weight:700; font-size:17px;}
+
+/* 会話画面のアバター */
+.partner-stage{display:flex; flex-direction:column; align-items:center; gap:8px; width:100%;}
+.partner-tag{
+  display:flex; align-items:center; gap:6px; font-family:var(--font-display); font-weight:700;
+  font-size:14px; color:var(--navy);
+}
+.partner-gear{
+  border:1px solid var(--line); background:var(--card); border-radius:999px; width:28px; height:28px;
+  cursor:pointer; font-size:14px; line-height:1; color:var(--muted);
+}
+
+/* アバター本体（写真／イラスト共通） */
+.partner-avatar{
+  position:relative; width:min(220px, 58vw); aspect-ratio:1/1; border-radius:24px; overflow:hidden;
+  background:#DFE6F2; margin:0 auto; box-shadow:0 10px 26px rgba(20,25,50,0.14);
+}
+.talking.partner-avatar{box-shadow:0 0 0 4px rgba(63,199,154,0.45), 0 10px 26px rgba(20,25,50,0.14);}
+
+/* 写真モード：表情ごとのグループを重ね、表示を切り替える */
+.pa-group{position:absolute; inset:0; visibility:hidden;}
+.partner-avatar[data-emo="neutral"] .pa-group[data-emo="neutral"],
+.partner-avatar[data-emo="joy"] .pa-group[data-emo="joy"],
+.partner-avatar[data-emo="sad"] .pa-group[data-emo="sad"],
+.partner-avatar[data-emo="surprised"] .pa-group[data-emo="surprised"]{visibility:visible;}
+.pa-group img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block;}
+.pa-group .pa-talk, .pa-group .pa-blink{visibility:hidden;}
+.partner-avatar.mouth-open .pa-group[data-emo] .pa-talk{visibility:inherit;}
+.partner-avatar.blink .pa-group[data-emo] .pa-blink{visibility:inherit;}
+.pa-group .pa-blink{z-index:2;}
+/* しゃべり写真がない表情は、話している間だけ小さく揺らす */
+.partner-avatar.talking .pa-group.no-talk .pa-base{animation:pa-bob 0.3s ease-in-out infinite alternate;}
+@keyframes pa-bob{from{transform:translateY(0) scale(1);} to{transform:translateY(-1.5%) scale(1.012);}}
+
+/* イラストモード */
+.pa-svg{width:100%; height:100%; display:block;}
+.pa-svg .eye, .pa-svg .brow{transform-box:fill-box; transform-origin:center; transition:transform 0.12s ease;}
+.pa-svg .eye-joy{display:none;}
+.pa-svg .blush{opacity:0.35; transition:opacity 0.2s;}
+.pa-svg .m{display:none;}
+.partner-avatar[data-emo="neutral"] .pa-svg .m-neutral,
+.partner-avatar[data-emo="joy"] .pa-svg .m-joy,
+.partner-avatar[data-emo="sad"] .pa-svg .m-sad,
+.partner-avatar[data-emo="surprised"] .pa-svg .m-surprised{display:inline;}
+.partner-avatar.mouth-open .pa-svg .m:not(.m-open){display:none;}
+.partner-avatar.mouth-open .pa-svg .m-open{display:inline;}
+.partner-avatar[data-emo="joy"] .pa-svg .eye{display:none;}
+.partner-avatar[data-emo="joy"] .pa-svg .eye-joy{display:inline;}
+.partner-avatar[data-emo="joy"] .pa-svg .blush{opacity:0.7;}
+.partner-avatar[data-emo="joy"] .pa-svg .brow{transform:translateY(-2px);}
+.partner-avatar[data-emo="sad"] .pa-svg .brow-l{transform:rotate(-14deg) translateY(1px);}
+.partner-avatar[data-emo="sad"] .pa-svg .brow-r{transform:rotate(14deg) translateY(1px);}
+.partner-avatar[data-emo="surprised"] .pa-svg .brow{transform:translateY(-6px);}
+.partner-avatar[data-emo="surprised"] .pa-svg .eye{transform:scale(1.2);}
+.partner-avatar.blink .pa-svg .eye{transform:scaleY(0.12);}
+.partner-avatar.talking .pa-svg{animation:pa-bob 0.35s ease-in-out infinite alternate;}
+
+/* 単語カードの読み上げボタン */
+.word-card{position:relative;}
+.say-btn{
+  position:absolute; top:12px; right:12px; border:1px solid var(--line); background:var(--paper);
+  border-radius:999px; width:34px; height:34px; cursor:pointer; font-size:15px;
+}
+
+/* 話し相手の設定モーダル */
+.modal-card.wide{max-width:520px;}
+.pm-row{display:flex; align-items:center; gap:10px; margin-bottom:10px;}
+.pm-row label{flex:none; width:44px; font-size:13px; color:var(--muted); font-weight:600;}
+.pm-row select, .pm-row input[type="text"]{
+  flex:1; min-width:0; font-family:var(--font-body); font-size:14px; padding:10px 12px;
+  border:1.5px solid var(--line); border-radius:10px; background:var(--paper);
+}
+.pm-preview{display:flex; gap:14px; align-items:center; margin:6px 0 14px;}
+.pm-preview .partner-avatar{width:132px; margin:0; flex:none; border-radius:18px;}
+.pm-preview-side{display:flex; flex-direction:column; gap:8px; flex:1;}
+.pm-emo-btns{display:flex; flex-wrap:wrap; gap:6px;}
+.pm-emo-btns .chip{font-size:12px; padding:6px 10px;}
+.pm-say{margin:0; padding:10px 12px; font-size:13px;}
+.pm-sub{font-family:var(--font-display); font-size:14px; margin:16px 0 4px;}
+.pm-note{font-size:11.5px; color:var(--muted); line-height:1.6; margin:4px 0 10px;}
+.pm-note.warn{color:var(--coral);}
+.pm-grid{display:grid; grid-template-columns:52px repeat(3, 1fr); gap:6px; align-items:center;}
+.pm-head{font-size:11.5px; color:var(--muted); text-align:center; font-weight:600;}
+.pm-emo{font-size:12px; font-weight:600; color:var(--navy);}
+.pm-slot{
+  position:relative; aspect-ratio:1/1; border:1.5px dashed var(--line); border-radius:10px;
+  background:var(--paper); display:flex; align-items:center; justify-content:center;
+  cursor:pointer; overflow:hidden; color:var(--muted); font-size:20px;
+}
+.pm-slot.has{border-style:solid;}
+.pm-slot img{width:100%; height:100%; object-fit:cover; display:block;}
+.pm-del{
+  position:absolute; top:3px; right:3px; width:22px; height:22px; border-radius:50%; border:none;
+  background:rgba(22,33,62,0.75); color:#fff; font-size:13px; line-height:1; cursor:pointer;
+}
+.pm-bulk-row{display:flex; gap:8px; margin-top:12px;}
+.pm-bulk-row .btn-secondary{flex:1; margin:0; padding:10px 8px; font-size:13px;}
+.pm-danger{color:var(--coral) !important;}
+
+/* バージョン情報 */
+.version-line{
+  font-family:var(--font-mono); font-size:11px; color:var(--muted); text-align:center;
+  margin:16px 0 0; cursor:pointer; line-height:1.6;
+}
+.version-line.warn{color:var(--coral);}
+.version-table{width:100%; border-collapse:collapse; font-size:13.5px;}
+.version-table th{text-align:left; color:var(--muted); font-weight:600; width:84px; padding:8px 6px 8px 0; vertical-align:top;}
+.version-table td{padding:8px 0; border-bottom:1px solid var(--line);}
+.version-table tr:last-child td{border-bottom:none;}

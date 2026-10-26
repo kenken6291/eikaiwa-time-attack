@@ -3,6 +3,10 @@
    ※ partner.js を先に読み込むこと
    GASウェブアプリのURLは config.js で設定してください
    ============================================================ */
+/** フロントエンドのバージョン — ファイルを更新したらここも更新する */
+const APP_VERSION = "2.1.0";
+const APP_UPDATED = "2026-10-26";
+
 const GAS_URL = String(window.GAS_URL || "");
 function gasUrlMissing(){ return !GAS_URL || GAS_URL.includes("XXXX"); }
 let RESPONSE_LIMIT_SEC = 3; // タイムアタックの制限時間（秒）— 画面上のセレクトで変更可能
@@ -274,6 +278,62 @@ function openPasswordModal(){
 }
 
 if (gasUrlMissing()) showAuthMsg("login-msg", "config.js の GAS_URL を設定してください");
+
+/* ============================================================
+   バージョン情報（画面＋サーバー）
+   ============================================================ */
+let serverVersion = null; // { version, updated, model } / 取得失敗時は { error }
+
+function versionText(){
+  const app = `画面 v${APP_VERSION}（${APP_UPDATED}）`;
+  let srv = "サーバー 確認中…";
+  if (serverVersion){
+    srv = serverVersion.error ? "サーバー 不明（旧版の可能性）" : `サーバー v${serverVersion.version}（${serverVersion.updated}）`;
+  }
+  return `${app} ／ ${srv}`;
+}
+function renderVersion(){
+  document.querySelectorAll("[data-version]").forEach(el => {
+    el.textContent = versionText();
+    const mismatch = serverVersion && !serverVersion.error && serverVersion.version !== APP_VERSION;
+    el.classList.toggle("warn", !!(mismatch || (serverVersion && serverVersion.error)));
+    el.title = mismatch ? "画面とサーバーのバージョンが違います。GASを新バージョンでデプロイしたか確認してください。" : "";
+  });
+}
+async function loadServerVersion(){
+  renderVersion();
+  if (gasUrlMissing()) return;
+  try{
+    const data = await rawCallBackend("getVersion", {});
+    serverVersion = data.version ? data : { error: true };
+  }catch(err){
+    serverVersion = { error: true };
+  }
+  renderVersion();
+}
+function openVersionModal(){
+  const s = serverVersion || {};
+  const mismatch = s.version && s.version !== APP_VERSION;
+  openModal(`
+    <h3>バージョン情報</h3>
+    <table class="version-table">
+      <tr><th>アプリ</th><td>Speak in 3</td></tr>
+      <tr><th>画面</th><td>v${escapeHtml(APP_VERSION)}（${escapeHtml(APP_UPDATED)}）</td></tr>
+      <tr><th>サーバー</th><td>${s.version ? `v${escapeHtml(s.version)}（${escapeHtml(s.updated || "")}）` : (s.error ? "取得できません（GASが旧版の可能性）" : "確認中…")}</td></tr>
+      ${s.model ? `<tr><th>AIモデル</th><td>${escapeHtml(s.model)}</td></tr>` : ""}
+      <tr><th>対応言語</th><td>${LANG_ORDER.map(c => LANGS[c].flag + " " + LANGS[c].label).join("、")}</td></tr>
+    </table>
+    ${mismatch ? `<p class="auth-msg">画面とサーバーのバージョンが違います。GASを「新バージョン」でデプロイしたか確認してください。</p>` : ""}
+    <div class="modal-actions"><button class="btn-primary" id="modal-cancel">閉じる</button></div>
+  `);
+  document.getElementById("modal-cancel").addEventListener("click", closeModal);
+}
+document.getElementById("menu-version-btn").addEventListener("click", () => {
+  document.getElementById("account-menu").hidden = true;
+  openVersionModal();
+});
+document.querySelectorAll("[data-version]").forEach(el => el.addEventListener("click", openVersionModal));
+loadServerVersion();
 
 /* --- 保存済みセッションの復元 --- */
 (async function restoreSession(){

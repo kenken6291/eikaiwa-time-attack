@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=2.1.0">
 </head>
 <body>
 
@@ -63,6 +63,7 @@
       <button type="submit" class="btn-primary">パスワードを設定する</button>
       <p class="auth-msg" id="forced-pw-msg"></p>
     </form>
+    <p class="version-line" data-version></p>
   </div>
 </div>
 
@@ -77,6 +78,7 @@
       <div class="account-menu" id="account-menu" hidden>
         <button type="button" id="menu-partner-btn">話し相手の設定</button>
         <button type="button" id="menu-nickname-btn">ニックネーム変更</button>
+        <button type="button" id="menu-version-btn">バージョン情報</button>
         <button type="button" id="menu-password-btn">パスワード変更</button>
         <button type="button" id="menu-logout-btn">ログアウト</button>
       </div>
@@ -159,6 +161,8 @@
         <input type="text" id="theme-input" placeholder="例：カフェでの注文、旅行の予定、週末の予定">
         <button type="submit" class="btn-secondary" style="margin-top:0;">このテーマで始める</button>
       </form>
+
+      <p class="version-line" data-version></p>
 
       <div class="past-panel">
         <button class="btn-secondary" id="show-past-btn">過去の記録から選ぶ</button>
@@ -297,8 +301,8 @@
   <div class="modal-card" id="modal-card"></div>
 </div>
 
-<script src="config.js?v=20261026-3"></script>
-<script src="partner.js?v=20261026-3"></script>
-<script src="script.js?v=20261026-3"></script>
+<script src="config.js?v=2.1.0"></script>
+<script src="partner.js?v=2.1.0"></script>
+<script src="script.js?v=2.1.0"></script>
 </body>
 </html>
