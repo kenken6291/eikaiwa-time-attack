@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=2.5.0">
+<link rel="stylesheet" href="style.css?v=2.6.0">
 </head>
 <body>
 
@@ -127,6 +127,12 @@
         </select>
       </div>
       <p class="lang-note" id="lang-note" hidden></p>
+
+      <div class="settings-row">
+        <label for="model-select">AIモデル</label>
+        <select id="model-select"></select>
+      </div>
+      <p class="model-hint" id="model-hint">選んだモデルが使えない時は、汎用の最新モデルに自動で切り替わります</p>
 
       <div class="settings-row">
         <label for="tts-engine-select">読み上げの声</label>
@@ -312,8 +318,8 @@
   <div class="modal-card" id="modal-card"></div>
 </div>
 
-<script src="config.js?v=2.5.0"></script>
-<script src="partner.js?v=2.5.0"></script>
-<script src="script.js?v=2.5.0"></script>
+<script src="config.js?v=2.6.0"></script>
+<script src="partner.js?v=2.6.0"></script>
+<script src="script.js?v=2.6.0"></script>
 </body>
 </html>

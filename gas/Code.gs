@@ -12,6 +12,14 @@
  *    - ADMIN_EMAILS    : 「みんなの話し相手」を登録・編集できる管理者のメールアドレス（会員登録したもの。複数はカンマ区切り）
  *    - PARTNER_FOLDER_ID : （任意）話し相手の写真を保存するフォルダID。未設定なら DRIVE_FOLDER_ID 内に「partners」フォルダを自動作成
  *    - TTS_MODEL       : （任意）Gemini の声のモデル。未設定なら gemini-3.8-flash-tts
+ *    - GEMINI_MODEL    : （任意）画面でモデルを選ばなかった時に使う Gemini モデル名（例: gemini-4-hydrogen）
+ *                        未設定なら汎用の最新モデル（FALLBACK_GEMINI_MODELS）を使用
+ *
+ * 【Geminiモデルの決定順】
+ *   1. 画面の「AIモデル」で選ばれたモデル（config.js の GEMINI_MODEL_OPTIONS）
+ *   2. スクリプトプロパティ GEMINI_MODEL
+ *   3. 汎用の最新モデル FALLBACK_GEMINI_MODELS を先頭から順に試す
+ *   ※ 指定モデルに該当がない（廃止・未公開・名前違い）場合は、自動で 3 に切り替えて再実行する
  * 2. デプロイ > 新しいデプロイ > ウェブアプリ
  *    実行ユーザー: 自分 / アクセスできるユーザー: 全員
  * 3. 発行されたURLを config.js の GAS_URL に貼り付け
@@ -21,11 +29,27 @@
  */
 
 /** サーバー（GAS）のバージョン — コードを変更したらここも更新する */
-const GAS_VERSION = "2.5.0";
-const GAS_UPDATED = "2026-10-26";
+const GAS_VERSION = "2.6.0";
+const GAS_UPDATED = "2026-11-19";
 
 const PROPS = PropertiesService.getScriptProperties();
-const GEMINI_MODEL = "gemini-3.6-flash";
+// 指定なし・該当なしの時に使う汎用の最新モデル（先頭から順に試す）
+//   gemini-flash-latest : Googleが常に最新の汎用モデルへ自動で差し替えるエイリアス
+//   gemini-4-hydrogen   : 2026年11月時点の汎用最新モデル（「日々の暮らしをサポート」）
+//   gemini-3.8-flash    : 最終的な保険
+const FALLBACK_GEMINI_MODELS = ["gemini-flash-latest", "gemini-4-hydrogen", "gemini-3.8-flash"];
+const GEMINI_MODEL_PATTERN = /^gemini-[a-z0-9][a-z0-9.\-]{0,60}$/;
+let requestedModel = ""; // このリクエストで使うモデル（doPost の最初で決める）
+let usedModel = "";      // 実際に応答したモデル（返却値に付ける）
+
+/** 画面から来たモデル名 → スクリプトプロパティ → 汎用の最新 の順で決める */
+function resolveGeminiModel(requested) {
+  const r = String(requested || "").trim().toLowerCase();
+  if (r && GEMINI_MODEL_PATTERN.test(r)) return r;
+  const p = String(PROPS.getProperty("GEMINI_MODEL") || "").trim().toLowerCase();
+  if (p && GEMINI_MODEL_PATTERN.test(p)) return p;
+  return FALLBACK_GEMINI_MODELS[0];
+}
 const SESSION_TTL_SEC = 6 * 60 * 60; // セッション有効期限 6時間
 const SENDER_EMAIL = "my60smyrules@gmail.com"; // 会員登録・パスワード再発行メールの送信元
 const SENDER_NAME = "Speak in 3";
@@ -80,10 +104,16 @@ function doPost(e) {
   let result;
   try {
     const req = JSON.parse(e.postData.contents);
+    requestedModel = resolveGeminiModel(req.model);
+    usedModel = "";
     switch (req.action) {
       // --- バージョン情報（ログイン不要） ---
       case "getVersion":
-        result = { version: GAS_VERSION, updated: GAS_UPDATED, model: GEMINI_MODEL, ttsModel: ttsModel() };
+        result = {
+          version: GAS_VERSION, updated: GAS_UPDATED,
+          model: requestedModel, defaultModel: resolveGeminiModel(""),
+          fallbackModels: FALLBACK_GEMINI_MODELS, ttsModel: ttsModel()
+        };
         break;
 
       // --- 会員認証（ログイン不要） ---
@@ -175,6 +205,12 @@ function doPost(e) {
     }
   } catch (err) {
     result = { error: String(err.message || err) };
+  }
+  // Geminiを使った処理には、実際に使ったモデルを付けて返す
+  if (usedModel && result && typeof result === "object" && !Array.isArray(result)) {
+    result.aiModel = usedModel;
+    result.aiRequestedModel = requestedModel;
+    result.aiFallback = usedModel !== requestedModel;
   }
   return ContentService.createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.TEXT);
@@ -384,12 +420,40 @@ function authorizeMailSending() {
 
 /* ============================================================
    Gemini 呼び出し共通関数
+   指定モデルに該当がない（廃止・未公開・名前違い）時は、汎用の最新モデルへ順に切り替える
    ============================================================ */
+function isModelNotFound(code, message) {
+  const m = String(message || "");
+  if (code === 404) return true;
+  if (code === 400 || code === 403) {
+    return /not found|is not supported|NOT_FOUND|unknown model|invalid model|does not have access/i.test(m);
+  }
+  return false;
+}
+
 function callGemini(prompt, expectJson) {
+  const first = requestedModel || resolveGeminiModel("");
+  const candidates = [first].concat(FALLBACK_GEMINI_MODELS.filter(m => m !== first));
+  let lastErr;
+  for (let i = 0; i < candidates.length; i++) {
+    try {
+      const text = callGeminiModel(candidates[i], prompt, expectJson);
+      usedModel = candidates[i];
+      return text;
+    } catch (err) {
+      lastErr = err;
+      if (!err.modelNotFound) throw err;
+      console.warn("Geminiモデル「" + candidates[i] + "」に該当がないため次の候補に切り替えます");
+    }
+  }
+  throw lastErr;
+}
+
+function callGeminiModel(model, prompt, expectJson) {
   const apiKey = PROPS.getProperty("GEMINI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY が設定されていません");
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + apiKey;
   const body = {
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: expectJson
@@ -406,7 +470,10 @@ function callGemini(prompt, expectJson) {
       payload: JSON.stringify(body),
       muteHttpExceptions: true
     });
-    const json = JSON.parse(res.getContentText());
+    const code = res.getResponseCode();
+    let json;
+    try { json = JSON.parse(res.getContentText()); }
+    catch (e) { json = { error: { message: "HTTP " + code } }; }
 
     if (!json.error) {
       const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -415,15 +482,20 @@ function callGemini(prompt, expectJson) {
     }
 
     lastError = json.error.message || "unknown error";
-    const isRetryable = res.getResponseCode() === 503 ||
+    if (isModelNotFound(code, lastError)) {
+      const nf = new Error("Gemini API error (" + model + "): " + lastError);
+      nf.modelNotFound = true;
+      throw nf;
+    }
+    const isRetryable = code === 503 || code === 429 ||
       /high demand|overloaded|unavailable/i.test(lastError);
     if (isRetryable && attempt < maxAttempts) {
       Utilities.sleep(800 * attempt); // 0.8s, 1.6s と間隔を空けて再試行
       continue;
     }
-    throw new Error("Gemini API error: " + lastError);
+    throw new Error("Gemini API error (" + model + "): " + lastError);
   }
-  throw new Error("Gemini API error: " + lastError);
+  throw new Error("Gemini API error (" + model + "): " + lastError);
 }
 
 /* ============================================================

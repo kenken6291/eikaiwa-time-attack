@@ -580,3 +580,7 @@ main{max-width:640px; margin:0 auto; padding:22px 18px 100px;}
   opacity:0; pointer-events:none; transition:opacity 0.25s, transform 0.25s; z-index:60;
 }
 .toast.show{opacity:1; transform:translate(-50%, 0);}
+
+/* AIモデル選択のヒント */
+.model-hint{font-size:12px; color:var(--muted); margin:-6px 0 14px; line-height:1.6;}
+.model-hint .used{display:block; color:var(--coral);}

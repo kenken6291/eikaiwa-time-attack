@@ -4,10 +4,10 @@
    GASウェブアプリのURLは config.js で設定してください
    ============================================================ */
 /** フロントエンドのバージョン — ファイルを更新したらここも更新する */
-const APP_VERSION = "2.5.0";
+const APP_VERSION = "2.6.0";
 /** この画面が必要とするサーバー（GAS）の最低バージョン。これより古いときだけ警告する */
-const REQUIRED_SERVER_VERSION = "2.5.0";
-const APP_UPDATED = "2026-10-26";
+const REQUIRED_SERVER_VERSION = "2.6.0";
+const APP_UPDATED = "2026-11-19";
 
 const GAS_URL = String(window.GAS_URL || "");
 function gasUrlMissing(){ return !GAS_URL || GAS_URL.includes("XXXX"); }
@@ -16,6 +16,53 @@ let RESPONSE_LIMIT_SEC = 3; // タイムアタックの制限時間（秒）— 
 document.getElementById("wait-time-select").addEventListener("change", (e) => {
   RESPONSE_LIMIT_SEC = Number(e.target.value);
 });
+
+/* ============================================================
+   AIモデル（Gemini）の選択 — 選んだモデルは端末に保存
+   ============================================================ */
+const MODEL_KEY = "speakin3_gemini_model";
+const GEMINI_MODEL_OPTIONS = Array.isArray(window.GEMINI_MODEL_OPTIONS) && window.GEMINI_MODEL_OPTIONS.length
+  ? window.GEMINI_MODEL_OPTIONS
+  : [{ value: "", label: "自動モード（汎用の最新）" }];
+let geminiModel = String(window.GEMINI_MODEL || "");
+let lastUsedModel = null; // { model, requested, fallback } 直近でAIが実際に使ったモデル
+
+function modelLabel(value){
+  const o = GEMINI_MODEL_OPTIONS.find(x => x.value === value);
+  return o ? o.label : (value || "自動モード（汎用の最新）");
+}
+function renderModelHint(){
+  const el = document.getElementById("model-hint");
+  if (!el) return;
+  let html = "選んだモデルが使えない時は、汎用の最新モデルに自動で切り替わります";
+  if (lastUsedModel){
+    html += `<span class="used">前回の使用：${escapeHtml(lastUsedModel.model)}${lastUsedModel.fallback ? `（${escapeHtml(lastUsedModel.requested)} が使えなかったため自動で切替）` : ""}</span>`;
+  }
+  el.innerHTML = html;
+}
+(function setupModelPicker(){
+  try{
+    const saved = localStorage.getItem(MODEL_KEY);
+    if (saved !== null && GEMINI_MODEL_OPTIONS.some(o => o.value === saved)) geminiModel = saved;
+  }catch(e){}
+  if (!GEMINI_MODEL_OPTIONS.some(o => o.value === geminiModel)) geminiModel = GEMINI_MODEL_OPTIONS[0].value;
+  const sel = document.getElementById("model-select");
+  if (!sel) return;
+  sel.innerHTML = "";
+  GEMINI_MODEL_OPTIONS.forEach(o => {
+    const op = document.createElement("option");
+    op.value = o.value;
+    op.textContent = o.label;
+    sel.appendChild(op);
+  });
+  sel.value = geminiModel;
+  sel.addEventListener("change", () => {
+    geminiModel = sel.value;
+    lastUsedModel = null;
+    try{ localStorage.setItem(MODEL_KEY, geminiModel); }catch(e){}
+    renderModelHint();
+  });
+})();
 
 /* ============================================================
    会員認証
@@ -341,7 +388,9 @@ function openVersionModal(){
       <tr><th>アプリ</th><td>Speak in 3</td></tr>
       <tr><th>画面</th><td>v${escapeHtml(APP_VERSION)}（${escapeHtml(APP_UPDATED)}）</td></tr>
       <tr><th>サーバー</th><td>${s.version ? `v${escapeHtml(s.version)}（${escapeHtml(s.updated || "")}）` : (s.error ? "取得できません（GASが旧版の可能性）" : "確認中…")}</td></tr>
-      ${s.model ? `<tr><th>AIモデル</th><td>${escapeHtml(s.model)}</td></tr>` : ""}
+      <tr><th>AIモデル（選択）</th><td>${escapeHtml(modelLabel(geminiModel))}${!geminiModel && s.defaultModel ? `<br><small>自動の既定：${escapeHtml(s.defaultModel)}</small>` : ""}</td></tr>
+      ${lastUsedModel ? `<tr><th>前回の使用</th><td>${escapeHtml(lastUsedModel.model)}${lastUsedModel.fallback ? "（自動で切替）" : ""}</td></tr>` : ""}
+      ${s.ttsModel ? `<tr><th>声のモデル</th><td>${escapeHtml(s.ttsModel)}</td></tr>` : ""}
       <tr><th>対応言語</th><td>${LANG_ORDER.map(c => LANGS[c].flag + " " + LANGS[c].label).join("、")}</td></tr>
     </table>
     ${mismatch ? `<p class="auth-msg">サーバーが古いです（v${escapeHtml(REQUIRED_SERVER_VERSION)}以上が必要）。GASを「新バージョン」でデプロイしたか確認してください。</p>` : ""}
@@ -375,6 +424,7 @@ function helpHTML(){
     <details class="help-sec">
       <summary>② 言語の選び方</summary>
       <p>テーマ画面の「練習する言語」で、${LANG_ORDER.map(c => LANGS[c].flag + LANGS[c].label).join("・")}から選べます。教材を作ったあとに言語を変えると、会話は新しい言語になりますが、単語・例文は前の言語のままです。新しい言語の教材にしたいときは、テーマをもう一度話すか入力してください。</p>
+      <p>「AIモデル」で、教材づくり・会話・ふりかえりに使う Gemini のモデルを選べます。迷ったら「自動モード（汎用の最新）」がおすすめです。選んだモデルが使えない時は、汎用の最新モデルに自動で切り替わります。</p>
       <p>「応答までの待ち時間」で、タイムアタックの制限時間（1〜8秒）を変えられます。慣れないうちは5秒や8秒がおすすめです。</p>
     </details>
 
@@ -681,7 +731,7 @@ async function callBackend(action, payload, timeoutMs = 12000){
     res = await fetch(GAS_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ action, sessionToken: auth.sessionToken, ...payload }),
+      body: JSON.stringify({ action, sessionToken: auth.sessionToken, model: geminiModel, ...payload }),
       signal: controller.signal
     });
   }catch(err){
@@ -693,6 +743,10 @@ async function callBackend(action, payload, timeoutMs = 12000){
   if (!res.ok) throw new Error("サーバーエラー: " + res.status);
   const data = await res.json();
   if (data.error) throw new Error(data.error);
+  if (data.aiModel){
+    lastUsedModel = { model: data.aiModel, requested: data.aiRequestedModel || "", fallback: !!data.aiFallback };
+    renderModelHint();
+  }
   return data;
 }
 
